@@ -116,9 +116,9 @@ export class Player {
   }
 
   // 吸収
-  absorb(item) {
+  absorb(item, multiplier = 1) {
     // アイテムの "栄養" でサイズ加算（収穫逓減）
-    const gain = item.nutrition * (1 / (1 + this.size * 0.2));
+    const gain = item.nutrition * (1 / (1 + this.size * 0.2)) * multiplier;
     this.size = Math.min(20, this.size + gain);
     this.absorbed++;
   }

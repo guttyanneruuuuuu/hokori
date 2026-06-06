@@ -34,6 +34,7 @@ const ui = new UI();
 const game = new Game(canvas);
 
 game.onHud = (d) => ui.updateHud(d);
+game.onCombo = (d) => ui.showCombo(d);
 game.onEnd = (d) => {
   // 少し待ってから End 画面へ
   setTimeout(() => ui.showEnd(d), 700);
@@ -59,13 +60,14 @@ document.querySelectorAll(".modal").forEach(m => {
 });
 
 // ---- ポーズ ----
+const syncPauseUI = () => ui.setPaused(game.state === "paused");
 document.getElementById("btn-pause").addEventListener("click", () => {
   game.togglePause();
-  ui.setPaused(game.state === "paused");
+  syncPauseUI();
 });
 document.getElementById("btn-resume").addEventListener("click", () => {
   game.resume();
-  ui.setPaused(false);
+  syncPauseUI();
 });
 document.getElementById("btn-restart").addEventListener("click", () => {
   ui.setPaused(false);
@@ -77,10 +79,14 @@ document.getElementById("btn-quit").addEventListener("click", () => {
   ui.showTitle();
 });
 
-// game.state の更新を監視して pause UI を同期
-setInterval(() => {
-  ui.setPaused(game.state === "paused");
-}, 100);
+// キーボード入力からのポーズ同期 (Escがmenuボタン押されたとき)
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" || e.key === "p" || e.key === "P") {
+    if (game.state === "playing" || game.state === "paused") {
+      requestAnimationFrame(syncPauseUI);
+    }
+  }
+});
 
 // ---- End screen ----
 document.getElementById("btn-retry").addEventListener("click", () => {
@@ -100,7 +106,20 @@ const initAudio = () => {
   game.audio.init();
   game.audio.resumeIfNeeded();
   window.removeEventListener("click", initAudio);
+  window.removeEventListener("touchstart", initAudio);
   window.removeEventListener("keydown", initAudio);
 };
 window.addEventListener("click", initAudio);
+window.addEventListener("touchstart", initAudio, { passive: true });
 window.addEventListener("keydown", initAudio);
+
+// Prevent zoom-by-double-tap on mobile (better game UX)
+let lastTap = 0;
+document.addEventListener("touchend", (e) => {
+  const now = Date.now();
+  if (now - lastTap < 300) e.preventDefault();
+  lastTap = now;
+}, { passive: false });
+
+// Prevent pinch zoom inside game area
+document.addEventListener("gesturestart", (e) => e.preventDefault());
