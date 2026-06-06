@@ -1,8 +1,8 @@
 // ============================================================
 // input.js — キーボード + バーチャルジョイスティック / タッチ入力
 //   - PC: WASD/矢印 + Shift(忍び足) + Space(ダッシュ)
-//   - スマホ: 画面左にバーチャルジョイスティック、右にダッシュ/スニーク
-//     バイブ対応、スタミナリング表示
+//   - スマホ: ダイナミックジョイスティック、右にダッシュ/スニーク
+//     バイブ対応、スタミナリング表示、レスポンシブ対応
 // ============================================================
 
 export class Input {
@@ -19,12 +19,13 @@ export class Input {
     this._btnDash = false;
     this._btnPause = false;
 
-    // タッチ状態
+    // ダイナミックジョイスティック状態
     this._stickPointerId = null;
     this._stickOrigin = { x: 0, y: 0 };
     this._stickPos = { x: 0, y: 0 };
     this._stickActive = false;
-    this._stickRadius = 60;   // ジョイスティック内側の最大移動距離
+    this._stickRadius = 65;   // ジョイスティック内側の最大移動距離
+    this._stickDeadzone = 10; // デッドゾーン
 
     // バイブ
     this.vibrateEnabled = true;
@@ -32,6 +33,9 @@ export class Input {
       const v = localStorage.getItem("dust-vibrate");
       if (v != null) this.vibrateEnabled = v === "1";
     } catch {}
+
+    // 画面向き
+    this._isLandscape = window.innerHeight < window.innerWidth;
 
     // --- キーボード ---
     window.addEventListener("keydown", (e) => {
@@ -57,6 +61,14 @@ export class Input {
       }
     });
 
+    // 画面向き変更検出
+    window.addEventListener("orientationchange", () => {
+      setTimeout(() => {
+        this._isLandscape = window.innerHeight < window.innerWidth;
+        this._updateTouchUILayout();
+      }, 100);
+    });
+
     // --- 仮想ジョイスティック UI (動的生成) ---
     this._buildTouchUI();
     this._bindTouchEvents();
@@ -73,9 +85,11 @@ export class Input {
     root.id = "touch-controls";
     root.className = "touch-controls";
     root.innerHTML = `
-      <div class="joystick-base" id="joystick-base">
-        <div class="joystick-knob" id="joystick-knob"></div>
-        <div class="joystick-hint">MOVE</div>
+      <div class="joystick-container" id="joystick-container">
+        <div class="joystick-base" id="joystick-base">
+          <div class="joystick-knob" id="joystick-knob"></div>
+          <div class="joystick-hint">MOVE</div>
+        </div>
       </div>
       <div class="action-buttons">
         <button class="action-btn sneak-btn" id="btn-sneak" aria-label="忍び足">
@@ -91,11 +105,23 @@ export class Input {
     `;
     document.body.appendChild(root);
 
+    this._stickContainer = document.getElementById("joystick-container");
     this._stickBase = document.getElementById("joystick-base");
     this._stickKnob = document.getElementById("joystick-knob");
     this._sneakBtn = document.getElementById("btn-sneak");
     this._dashBtn = document.getElementById("btn-dash");
     this._staminaRing = this._dashBtn?.querySelector(".stamina-ring");
+  }
+
+  _updateTouchUILayout() {
+    // 画面向きに応じたレイアウト調整
+    if (this._stickContainer) {
+      if (this._isLandscape) {
+        this._stickContainer.style.opacity = "0.9";
+      } else {
+        this._stickContainer.style.opacity = "1";
+      }
+    }
   }
 
   _bindTouchEvents() {
@@ -106,11 +132,24 @@ export class Input {
       if (this._stickActive) return;
       this._stickActive = true;
       this._stickPointerId = e.pointerId ?? "touch";
-      const rect = stickArea.getBoundingClientRect();
-      this._stickOrigin.x = rect.left + rect.width / 2;
-      this._stickOrigin.y = rect.top + rect.height / 2;
+      
+      // ダイナミック: タッチ開始位置がジョイスティックの中心になる
+      const rect = stickArea.parentElement.getBoundingClientRect();
+      this._stickOrigin.x = x;
+      this._stickOrigin.y = y;
+      
+      // ジョイスティックベースの位置を更新
+      const offsetX = x - rect.left;
+      const offsetY = y - rect.top;
+      if (stickArea.parentElement) {
+        stickArea.parentElement.style.left = `${offsetX - 70}px`;
+        stickArea.parentElement.style.bottom = `auto`;
+        stickArea.parentElement.style.top = `${offsetY - 70}px`;
+      }
+      
       this._updateStick(x, y);
       stickArea.classList.add("active");
+      this.vibrate(6);
     };
     const moveStick = (x, y) => {
       if (!this._stickActive) return;
@@ -124,6 +163,12 @@ export class Input {
         this._stickKnob.style.transform = "translate(-50%, -50%)";
       }
       stickArea.classList.remove("active");
+      // ジョイスティックを元の位置に戻す
+      if (stickArea.parentElement) {
+        stickArea.parentElement.style.left = "";
+        stickArea.parentElement.style.bottom = "";
+        stickArea.parentElement.style.top = "";
+      }
     };
 
     // Pointer Events (modern, unified)
@@ -164,11 +209,14 @@ export class Input {
       // タッチ時のスクロール/ズーム抑制
       el.addEventListener("touchstart", (e) => e.preventDefault(), { passive: false });
     };
-    bindBtn(this._sneakBtn, (v) => this._btnSneak = v, 8);
+    bindBtn(this._sneakBtn, (v) => this._btnSneak = v, 10);
     bindBtn(this._dashBtn, (v) => {
       this._btnDash = v;
-      if (v) this.pressed.add(" "); // ダッシュ単発
-    }, 14);
+      if (v) {
+        this.pressed.add(" "); // ダッシュ単発
+        this.vibrate(18);
+      }
+    }, 0);
   }
 
   _updateStick(clientX, clientY) {
@@ -185,7 +233,7 @@ export class Input {
       this._stickKnob.style.transform = `translate(calc(-50% + ${kx}px), calc(-50% + ${ky}px))`;
     }
     // デッドゾーン
-    const dead = 8;
+    const dead = this._stickDeadzone;
     if (d < dead) {
       this._axisX = 0; this._axisY = 0;
     } else {

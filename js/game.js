@@ -334,7 +334,11 @@ export class Game {
     for (const h of this.humans) {
       h.update(dt, this.player, this.world, this.lastVisibility);
       maxSus = Math.max(maxSus, h.suspicion);
-      if (h.state === "alarm" && h.hasVacuum) anyAlarm = true;
+      if (h.state === "alarm" && h.hasVacuum) {
+        anyAlarm = true;
+        // 警戒時の警告振動
+        this.input.vibrate(12);
+      }
 
       // 接触＆掃除機起動中ならゲームオーバー（無敵時は無効）
       if (h.hasVacuum) {
@@ -356,7 +360,7 @@ export class Game {
             this.score += 200;
             this.audio.pop(880, 0.18, "triangle", 0.35);
             if (this.onFlash) this.onFlash("power");
-            this.input.vibrate(60);
+            this.input.vibrate([40, 20, 40]);
           } else {
             return this._end("lose", "掃除機に吸われてしまった…");
           }
@@ -382,7 +386,7 @@ export class Game {
           this.score += 100;
           this.audio.pop(500, 0.2, "square", 0.3);
           if (this.onFlash) this.onFlash("power");
-          this.input.vibrate(40);
+          this.input.vibrate([30, 15, 30]);
         } else {
           return this._end("lose", "ロボット掃除機に発見されてしまった…");
         }
@@ -512,11 +516,20 @@ export class Game {
             : "rgba(232,220,180,1)"
     });
 
-    // 音
+    // 音と振動
     this.audio.absorb(this.player.size);
     if (this.combo >= 3 && this.combo % 3 === 0) {
       this.audio.combo(this.combo);
       if (this.onFlash) this.onFlash("good");
+      // コンボ達成時の振動
+      const vibeStrength = Math.min(50, this.combo * 3);
+      this.input.vibrate(vibeStrength);
+    } else if (item.power) {
+      // パワーアップ取得時の強い振動
+      this.input.vibrate(30);
+    } else if (this.combo >= 2) {
+      // コンボ継続時の軽い振動
+      this.input.vibrate(8);
     }
 
     // UI コンボ
@@ -545,8 +558,16 @@ export class Game {
     this._ended = true;
     this.state = result === "win" ? "win" : "gameover";
     this.audio.stopBGM();
-    if (result === "win") this.audio.victory();
-    else { this.audio.gameOver(); this.audio.vacuumNoise(); }
+    if (result === "win") {
+      this.audio.victory();
+      // 勝利時の振動パターン
+      this.input.vibrate([100, 50, 100]);
+    } else {
+      this.audio.gameOver();
+      this.audio.vacuumNoise();
+      // 敗北時の振動パターン
+      this.input.vibrate([200, 100, 200, 100, 200]);
+    }
 
     // ハイスコア更新
     let newBest = false;
