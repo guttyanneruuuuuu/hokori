@@ -88,8 +88,9 @@ export class Human {
 
     const gain = this.suspicionGain;
     if (see) {
-      // 視認時の疑念増加を強化
-      this.suspicion += dt * (1.4 + visibility * 0.8) * (1 + player.size * 0.08) * gain;
+      // 視認時の疑念増加を強化。暗がりにいる場合は疑念の上昇を大幅に抑える
+      const effectiveVisibility = visibility < 0.3 ? visibility * 0.2 : visibility;
+      this.suspicion += dt * (1.4 + effectiveVisibility * 0.8) * (1 + player.size * 0.08) * gain;
       this.lastSeenX = player.x;
       this.lastSeenY = player.y;
       this.alertness = 1;

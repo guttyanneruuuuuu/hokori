@@ -85,10 +85,9 @@ export class Input {
     root.id = "touch-controls";
     root.className = "touch-controls";
     root.innerHTML = `
-      <div class="joystick-container" id="joystick-container">
-        <div class="joystick-base" id="joystick-base">
-          <div class="joystick-knob" id="joystick-knob"></div>
-          <div class="joystick-hint">MOVE</div>
+      <div class="joystick-container" id="joystick-container" style="position: fixed; inset: 0; pointer-events: none;">
+        <div class="joystick-base" id="joystick-base" style="display: none; position: absolute; width: 120px; height: 120px; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.2); border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; z-index: 1000;">
+          <div class="joystick-knob" id="joystick-knob" style="position: absolute; top: 50%; left: 50%; width: 50px; height: 50px; background: rgba(255,255,255,0.4); border-radius: 50%; transform: translate(-50%, -50%);"></div>
         </div>
       </div>
       <div class="action-buttons">
@@ -133,22 +132,23 @@ export class Input {
       this._stickActive = true;
       this._stickPointerId = e.pointerId ?? "touch";
       
-      // ダイナミック: タッチ開始位置がジョイスティックの中心になる
-      const rect = stickArea.parentElement.getBoundingClientRect();
+      // 画面の左半分でのみジョイスティックを有効にする
+      if (x > window.innerWidth / 2) {
+        this._stickActive = false;
+        return;
+      }
+
       this._stickOrigin.x = x;
       this._stickOrigin.y = y;
       
-      // ジョイスティックベースの位置を更新
-      const offsetX = x - rect.left;
-      const offsetY = y - rect.top;
-      if (stickArea.parentElement) {
-        stickArea.parentElement.style.left = `${offsetX - 70}px`;
-        stickArea.parentElement.style.bottom = `auto`;
-        stickArea.parentElement.style.top = `${offsetY - 70}px`;
+      if (this._stickBase) {
+        this._stickBase.style.display = "block";
+        this._stickBase.style.left = `${x}px`;
+        this._stickBase.style.top = `${y}px`;
+        this._stickBase.classList.add("active");
       }
       
       this._updateStick(x, y);
-      stickArea.classList.add("active");
       this.vibrate(6);
     };
     const moveStick = (x, y) => {
@@ -162,25 +162,22 @@ export class Input {
       if (this._stickKnob) {
         this._stickKnob.style.transform = "translate(-50%, -50%)";
       }
-      stickArea.classList.remove("active");
-      // ジョイスティックを元の位置に戻す
-      if (stickArea.parentElement) {
-        stickArea.parentElement.style.left = "";
-        stickArea.parentElement.style.bottom = "";
-        stickArea.parentElement.style.top = "";
+      if (this._stickBase) {
+        this._stickBase.classList.remove("active");
+        this._stickBase.style.display = "none";
       }
     };
 
     // Pointer Events (modern, unified)
-    stickArea.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      stickArea.setPointerCapture?.(e.pointerId);
+    // 画面全体（左半分）でジョイスティックを開始できるように変更
+    window.addEventListener("pointerdown", (e) => {
+      // ボタン類を触っている場合は無視
+      if (e.target.closest("button") || e.target.closest(".action-btn")) return;
       startStick(e, e.clientX, e.clientY);
     });
-    stickArea.addEventListener("pointermove", (e) => {
+    window.addEventListener("pointermove", (e) => {
       if (!this._stickActive) return;
       if (this._stickPointerId !== e.pointerId && this._stickPointerId !== "touch") return;
-      e.preventDefault();
       moveStick(e.clientX, e.clientY);
     });
     const endHandler = (e) => {
@@ -188,8 +185,8 @@ export class Input {
       if (this._stickPointerId !== e.pointerId && this._stickPointerId !== "touch") return;
       endStick();
     };
-    stickArea.addEventListener("pointerup", endHandler);
-    stickArea.addEventListener("pointercancel", endHandler);
+    window.addEventListener("pointerup", endHandler);
+    window.addEventListener("pointercancel", endHandler);
 
     // --- アクションボタン ---
     const bindBtn = (el, setFn, vibeMs = 0) => {

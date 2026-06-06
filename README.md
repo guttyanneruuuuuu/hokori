@@ -83,4 +83,4 @@ python3 -m http.server 8000
 
 ---
 
-Made with 🌫️ by guttyanneruuuuuu
+Made with 🌫️ by Manus & guttyanneruuuuuu

@@ -276,11 +276,15 @@ export class Player {
     for (const h of this.hairs) {
       const wob = Math.sin(this.t * 4 + h.wobble) * 0.15;
       const a = h.a + wob;
-      const l = r * (0.9 + h.len);
-      ctx.lineWidth = 1.2;
+      const l = r * (1.1 + h.len); // 少し長く
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * r * 0.6, Math.sin(a) * r * 0.6);
-      ctx.lineTo(Math.cos(a) * l, Math.sin(a) * l);
+      ctx.moveTo(Math.cos(a) * r * 0.5, Math.sin(a) * r * 0.5);
+      // 曲線にする
+      ctx.quadraticCurveTo(
+        Math.cos(a + 0.2) * l * 0.6, Math.sin(a + 0.2) * l * 0.6,
+        Math.cos(a) * l, Math.sin(a) * l
+      );
       ctx.stroke();
     }
     ctx.restore();
