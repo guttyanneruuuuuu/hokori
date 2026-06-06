@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DUST — ほこりサバイバル</title>
+  <meta name="description" content="ホコリ視点のステルス・サバイバル・ゲーム" />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;700;900&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- ====== タイトル画面 ====== -->
+  <section id="title-screen" class="screen active">
+    <div class="title-bg"></div>
+    <div class="dust-particles" id="title-particles"></div>
+
+    <div class="title-content">
+      <h1 class="title-main">
+        <span class="title-word">D</span><span class="title-word">U</span><span class="title-word">S</span><span class="title-word">T</span>
+      </h1>
+      <p class="title-sub">— ほこりサバイバル —</p>
+      <p class="title-tagline">
+        あなたは床の片隅で生まれた小さなホコリ。<br/>
+        掃除機に吸われる前に、仲間を吸収して "塵の王" を目指せ。
+      </p>
+
+      <div class="title-menu">
+        <button class="menu-btn primary" id="btn-start">ゲームを始める</button>
+        <button class="menu-btn" id="btn-howto">遊び方</button>
+        <button class="menu-btn" id="btn-credits">クレジット</button>
+      </div>
+
+      <p class="title-hint">音が出ます — ヘッドホン推奨 🎧</p>
+    </div>
+  </section>
+
+  <!-- ====== 遊び方モーダル ====== -->
+  <div class="modal" id="howto-modal">
+    <div class="modal-content">
+      <h2>遊び方</h2>
+      <ul class="howto-list">
+        <li><kbd>WASD</kbd> / <kbd>矢印</kbd> &nbsp;移動</li>
+        <li><kbd>Shift</kbd>（押している間）&nbsp;静かに歩く（音が小さい）</li>
+        <li><kbd>Space</kbd> &nbsp;ダッシュ（速いが目立つ）</li>
+        <li><kbd>P</kbd> / <kbd>Esc</kbd> &nbsp;ポーズ</li>
+      </ul>
+      <h3>ルール</h3>
+      <ul class="howto-list">
+        <li>🌫️ 床のホコリ・髪の毛・食べカスを吸収して大きくなる</li>
+        <li>🕯️ 明るい場所では人間に発見されやすい — 影に隠れろ</li>
+        <li>👁️ 人間や掃除ロボットの <strong>視界コーン</strong> に入ると警戒される</li>
+        <li>🚨 警戒が最大になると掃除機が起動 — 吸われたらゲームオーバー</li>
+        <li>🏆 制限時間内に目標サイズに到達すればクリア！</li>
+      </ul>
+      <button class="menu-btn" data-close-modal>閉じる</button>
+    </div>
+  </div>
+
+  <!-- ====== クレジットモーダル ====== -->
+  <div class="modal" id="credits-modal">
+    <div class="modal-content">
+      <h2>クレジット</h2>
+      <p>Design &amp; Code: <strong>guttyanneruuuuuu</strong></p>
+      <p>Built with Vanilla JS + HTML5 Canvas</p>
+      <p class="muted">No external libraries. All graphics & sound are procedural.</p>
+      <button class="menu-btn" data-close-modal>閉じる</button>
+    </div>
+  </div>
+
+  <!-- ====== ゲーム画面 ====== -->
+  <section id="game-screen" class="screen">
+    <!-- HUD -->
+    <div class="hud">
+      <div class="hud-left">
+        <div class="hud-row">
+          <span class="hud-label">SIZE</span>
+          <div class="hud-bar"><div class="hud-bar-fill" id="hud-size-fill"></div></div>
+          <span class="hud-value" id="hud-size-text">0.0</span>
+        </div>
+        <div class="hud-row">
+          <span class="hud-label">ALERT</span>
+          <div class="hud-bar alert"><div class="hud-bar-fill" id="hud-alert-fill"></div></div>
+        </div>
+      </div>
+      <div class="hud-center">
+        <div class="hud-time" id="hud-time">3:00</div>
+        <div class="hud-goal">GOAL: <span id="hud-goal">10.0</span></div>
+      </div>
+      <div class="hud-right">
+        <button class="hud-btn" id="btn-pause" title="Pause (P)">⏸</button>
+      </div>
+    </div>
+
+    <!-- 警告オーバーレイ -->
+    <div class="alert-overlay" id="alert-overlay"></div>
+
+    <!-- メインキャンバス -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- ポーズメニュー -->
+    <div class="pause-overlay" id="pause-overlay">
+      <div class="pause-content">
+        <h2>PAUSED</h2>
+        <button class="menu-btn primary" id="btn-resume">再開</button>
+        <button class="menu-btn" id="btn-restart">最初から</button>
+        <button class="menu-btn" id="btn-quit">タイトルへ</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== ゲームオーバー / クリア ====== -->
+  <section id="end-screen" class="screen">
+    <div class="end-content">
+      <h1 id="end-title">GAME OVER</h1>
+      <p id="end-desc"></p>
+      <div class="end-stats">
+        <div><span>到達サイズ</span><strong id="end-size">0.0</strong></div>
+        <div><span>吸収数</span><strong id="end-count">0</strong></div>
+        <div><span>生存時間</span><strong id="end-time">0:00</strong></div>
+      </div>
+      <div class="end-menu">
+        <button class="menu-btn primary" id="btn-retry">もう一度</button>
+        <button class="menu-btn" id="btn-back-title">タイトルへ</button>
+      </div>
+    </div>
+  </section>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
