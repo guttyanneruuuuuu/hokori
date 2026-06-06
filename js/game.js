@@ -36,6 +36,7 @@ export class Game {
 
     this.camX = 0;
     this.camY = 0;
+    this.zoom = 1;
     this.shake = 0;
     this._shakeSeed = 0;
 
@@ -111,6 +112,19 @@ export class Game {
     this.elapsed = 0;
     this.state = "playing";
     this.shake = 0;
+    // ズーム初期値は画面サイズに応じて
+    {
+      const w = this.engine.width, h = this.engine.height;
+      const minDim = Math.min(w, h);
+      this.zoom = minDim < 420 ? 0.75 : minDim < 600 ? 0.85 : minDim < 900 ? 1.0 : 1.1;
+    }
+    // カメラを即座にプレイヤーへ合わせる
+    {
+      const vw = this.engine.width / this.zoom;
+      const vh = this.engine.height / this.zoom;
+      this.camX = clamp(this.player.x - vw / 2, -40, this.world.w - vw + 40);
+      this.camY = clamp(this.player.y - vh / 2, -40, this.world.h - vh + 40);
+    }
     this.combo = 0;
     this.comboTimer = 0;
     this.comboMult = 1;
@@ -257,16 +271,30 @@ export class Game {
     // パーティクル
     this.particles.update(dt, this.world);
 
-    // カメラ追従 (ワールド境界クランプ)
+    // ズーム計算 (スマホ縦画面のように画面が狭い場合は少し引き気味、横長は近く)
+    // 基準: 700px ビュー幅 = ズーム 1
     const viewW = this.engine.width;
     const viewH = this.engine.height;
-    const targetX = this.player.x - viewW / 2;
-    const targetY = this.player.y - viewH / 2;
+    const minDim = Math.min(viewW, viewH);
+    let targetZoom;
+    if (minDim < 420) targetZoom = 0.75;
+    else if (minDim < 600) targetZoom = 0.85;
+    else if (minDim < 900) targetZoom = 1.0;
+    else targetZoom = 1.1;
+    this.zoom = lerp(this.zoom, targetZoom, Math.min(1, dt * 4));
+
+    // ズーム後のビュー範囲
+    const vw = viewW / this.zoom;
+    const vh = viewH / this.zoom;
+
+    // カメラ追従 (ワールド境界クランプ)
+    const targetX = this.player.x - vw / 2;
+    const targetY = this.player.y - vh / 2;
     const camLerp = Math.min(1, dt * 5);
     this.camX = lerp(this.camX, targetX, camLerp);
     this.camY = lerp(this.camY, targetY, camLerp);
-    this.camX = clamp(this.camX, -40, this.world.w - viewW + 40);
-    this.camY = clamp(this.camY, -40, this.world.h - viewH + 40);
+    this.camX = clamp(this.camX, -40, this.world.w - vw + 40);
+    this.camY = clamp(this.camY, -40, this.world.h - vh + 40);
 
     // 画面揺れ
     if (anyAlarm) this.shake = Math.max(this.shake, 5);
@@ -355,19 +383,26 @@ export class Game {
 
     const w = this.engine.width;
     const h = this.engine.height;
+    const z = this.zoom;
+    const vw = w / z;
+    const vh = h / z;
 
     // 背景クリア (黒)
     ctx.fillStyle = "#04040a";
     ctx.fillRect(0, 0, w, h);
 
-    // カメラ揺れ
+    // カメラ揺れ (ワールド単位)
     const shx = this.shake ? (Math.sin(this._shakeSeed * 47) * this.shake) : 0;
     const shy = this.shake ? (Math.cos(this._shakeSeed * 53) * this.shake) : 0;
     const cx = this.camX + shx;
     const cy = this.camY + shy;
 
+    // ---- ワールド変換 (zoom) 適用 ----
+    ctx.save();
+    ctx.scale(z, z);
+
     // ベースレイヤー
-    this.world.drawFloor(ctx, cx, cy, w, h);
+    this.world.drawFloor(ctx, cx, cy, vw, vh);
     this.world.drawShadows(ctx, cx, cy);
     this.world.drawFurniture(ctx, cx, cy);
 
@@ -385,38 +420,43 @@ export class Game {
     for (const human of this.humans) human.draw(ctx, cx, cy);
     for (const v of this.vacuums) v.draw(ctx, cx, cy);
 
-    // ライティングを乗算
-    this.lighting.render(ctx, this.world, cx, cy, w, h, this.player);
+    ctx.restore();
 
-    // === ライティングの "上" に描画するもの ===
+    // ---- ライティングは画面サイズで合成 ----
+    // lighting は darkCanvas に viewW/viewH で描画後 ctx.drawImage(0,0) で乗せる方式。
+    // zoom 適用時は ctx の transform を一時的に解除して 1:1 で乗せた方が正確。
+    // ここでは lighting 内部の世界座標を z で扱うため、 zoom 込みのワールド座標→画面座標変換を渡す。
+    ctx.save();
+    ctx.scale(z, z);
+    this.lighting.render(ctx, this.world, cx, cy, vw, vh, this.player);
+    ctx.restore();
+
+    // === ライティングの "上" に描画するもの (zoom 付き) ===
+    ctx.save();
+    ctx.scale(z, z);
     // 視界コーンはゲームメカニクスとして常に見えるべき
     for (const human of this.humans) human.drawVisionCone(ctx, cx, cy);
-
-    // プレイヤーのアウトライン強調（暗くて見えない事故防止）
+    // プレイヤーのアウトライン
     this._drawPlayerOutline(ctx, cx, cy);
-
     // 吸引範囲インジケータ
     this._drawPullIndicator(ctx, cx, cy);
-
-    // 疑念アイコンが暗闇で消えないように人間頭上のアイコンも再描画
+    // 疑念アイコン
     for (const human of this.humans) {
       if (human.suspicion > 0.1) {
         human._drawSuspicionIcon(ctx, human.x - cx, human.y - cy - 44);
       }
     }
+    ctx.restore();
 
-    // 方向矢印 (画面外の敵)
-    this._drawOffscreenIndicators(ctx, w, h, cx, cy);
-
+    // === HUD / UI (zoom 適用しない) ===
+    // 方向矢印 (画面外の敵) — 画面サイズ基準
+    this._drawOffscreenIndicators(ctx, w, h, cx, cy, z);
     // ミニマップ
     this._drawMinimap(ctx, w, h);
-
     // スコア表示
     this._drawScore(ctx, w, h);
-
     // 序盤のチュートリアルヒント
     if (this.elapsed < 7) this._drawTutorial(ctx, w, h);
-
     // 警告メッセージ
     this._drawWarnings(ctx, w, h);
 
@@ -492,12 +532,8 @@ export class Game {
     ctx.restore();
   }
 
-  // 画面外の脅威を示す矢印
-  _drawOffscreenIndicators(ctx, w, h, cx, cy) {
-    const px = this.player.x - cx;
-    const py = this.player.y - cy;
-    const margin = 30;
-
+  // 画面外の脅威を示す矢印 (画面座標で描画)
+  _drawOffscreenIndicators(ctx, w, h, cx, cy, z = 1) {
     const drawArrow = (sx, sy, color) => {
       // sx,sy は画面上の対象座標
       const ang = Math.atan2(sy - h / 2, sx - w / 2);
@@ -508,32 +544,36 @@ export class Game {
       ctx.translate(ax, ay);
       ctx.rotate(ang);
       ctx.fillStyle = color;
-      ctx.globalAlpha = 0.85;
+      ctx.globalAlpha = 0.9;
       ctx.beginPath();
       ctx.moveTo(0, 0);
-      ctx.lineTo(-14, -7);
-      ctx.lineTo(-10, 0);
-      ctx.lineTo(-14, 7);
+      ctx.lineTo(-18, -9);
+      ctx.lineTo(-13, 0);
+      ctx.lineTo(-18, 9);
       ctx.closePath();
       ctx.fill();
+      // 縁取り
+      ctx.strokeStyle = "rgba(0,0,0,0.5)";
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
       ctx.restore();
     };
+    const margin = 30;
 
     for (const human of this.humans) {
       if (human.suspicion < 0.45) continue;
-      const sx = human.x - cx;
-      const sy = human.y - cy;
+      const sx = (human.x - cx) * z;
+      const sy = (human.y - cy) * z;
       if (sx < -margin || sx > w + margin || sy < -margin || sy > h + margin) {
         const col = human.state === "alarm" ? "rgba(217,74,74,1)" : "rgba(240,160,96,1)";
         drawArrow(sx, sy, col);
       }
     }
     for (const v of this.vacuums) {
-      const sx = v.x - cx;
-      const sy = v.y - cy;
-      // 接近時のみ表示
+      const sx = (v.x - cx) * z;
+      const sy = (v.y - cy) * z;
       const dx = v.x - this.player.x, dy = v.y - this.player.y;
-      if (Math.hypot(dx, dy) > 320) continue;
+      if (Math.hypot(dx, dy) > 360) continue;
       if (sx < -margin || sx > w + margin || sy < -margin || sy > h + margin) {
         drawArrow(sx, sy, "rgba(217,74,74,1)");
       }
