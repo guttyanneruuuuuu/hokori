@@ -40,15 +40,23 @@
   <div class="modal" id="howto-modal">
     <div class="modal-content">
       <h2>遊び方</h2>
+      <h3>PC操作</h3>
       <ul class="howto-list">
         <li><kbd>WASD</kbd> / <kbd>矢印</kbd> &nbsp;移動</li>
         <li><kbd>Shift</kbd>（押している間）&nbsp;静かに歩く（音が小さい）</li>
         <li><kbd>Space</kbd> &nbsp;ダッシュ（速いが目立つ）</li>
         <li><kbd>P</kbd> / <kbd>Esc</kbd> &nbsp;ポーズ</li>
       </ul>
+      <h3>スマホ操作</h3>
+      <ul class="howto-list">
+        <li>🕹️ 左下のジョイスティック &nbsp;移動</li>
+        <li>🤫 SNEAK ボタン &nbsp;静かに歩く</li>
+        <li>⚡ DASH ボタン &nbsp;ダッシュ</li>
+      </ul>
       <h3>ルール</h3>
       <ul class="howto-list">
         <li>🌫️ 床のホコリ・髪の毛・食べカスを吸収して大きくなる</li>
+        <li>🔥 連続吸収で <strong>コンボボーナス</strong> 発生！</li>
         <li>🕯️ 明るい場所では人間に発見されやすい — 影に隠れろ</li>
         <li>👁️ 人間や掃除ロボットの <strong>視界コーン</strong> に入ると警戒される</li>
         <li>🚨 警戒が最大になると掃除機が起動 — 吸われたらゲームオーバー</li>
@@ -95,6 +103,12 @@
 
     <!-- 警告オーバーレイ -->
     <div class="alert-overlay" id="alert-overlay"></div>
+
+    <!-- コンボ表示 -->
+    <div class="combo-display" id="combo-display">
+      <span class="combo-value" id="combo-value">x2</span>
+      <span class="combo-label">COMBO</span>
+    </div>
 
     <!-- メインキャンバス -->
     <canvas id="game-canvas"></canvas>
