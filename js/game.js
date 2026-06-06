@@ -16,7 +16,7 @@ import { AudioSystem } from "./audio.js";
 import { clamp, dist, lerp } from "./utils.js";
 
 const GAME_DURATION = 180; // 3 分
-const GOAL_SIZE = 10.0;
+const GOAL_SIZE = 8.0;
 
 export class Game {
   constructor(canvas) {
@@ -238,6 +238,8 @@ export class Game {
       absorbed: this.player.absorbed,
       elapsed: this.elapsed,
     });
+    // エンジン停止 (少し遅延 — 最後のフレームを表示するため)
+    setTimeout(() => this.engine.stop(), 1500);
   }
 
   // ---------- 内部 render ----------
