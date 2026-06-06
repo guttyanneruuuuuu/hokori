@@ -2,7 +2,7 @@
 // input.js — キーボード + バーチャルジョイスティック / タッチ入力
 //   - PC: WASD/矢印 + Shift(忍び足) + Space(ダッシュ)
 //   - スマホ: 画面左にバーチャルジョイスティック、右にダッシュ/スニーク
-//     画面のどこでもドラッグでジョイスティック化 (ad-hoc joystick)
+//     バイブ対応、スタミナリング表示
 // ============================================================
 
 export class Input {
@@ -26,6 +26,13 @@ export class Input {
     this._stickActive = false;
     this._stickRadius = 60;   // ジョイスティック内側の最大移動距離
 
+    // バイブ
+    this.vibrateEnabled = true;
+    try {
+      const v = localStorage.getItem("dust-vibrate");
+      if (v != null) this.vibrateEnabled = v === "1";
+    } catch {}
+
     // --- キーボード ---
     window.addEventListener("keydown", (e) => {
       // メタキー/ファンクションは無視
@@ -42,6 +49,12 @@ export class Input {
     window.addEventListener("blur", () => {
       this.keys.clear();
       this._resetTouch();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        this.keys.clear();
+        this._resetTouch();
+      }
     });
 
     // --- 仮想ジョイスティック UI (動的生成) ---
@@ -70,6 +83,7 @@ export class Input {
           <span class="action-label">SNEAK</span>
         </button>
         <button class="action-btn dash-btn" id="btn-dash" aria-label="ダッシュ">
+          <span class="stamina-ring" style="--stamina:100"></span>
           <span class="action-icon">⚡</span>
           <span class="action-label">DASH</span>
         </button>
@@ -81,10 +95,11 @@ export class Input {
     this._stickKnob = document.getElementById("joystick-knob");
     this._sneakBtn = document.getElementById("btn-sneak");
     this._dashBtn = document.getElementById("btn-dash");
+    this._staminaRing = this._dashBtn?.querySelector(".stamina-ring");
   }
 
   _bindTouchEvents() {
-    // ジョイスティック: 左半分の画面どこかタッチで起動 (固定ベース)
+    // ジョイスティック
     const stickArea = this._stickBase;
 
     const startStick = (e, x, y) => {
@@ -130,24 +145,30 @@ export class Input {
     };
     stickArea.addEventListener("pointerup", endHandler);
     stickArea.addEventListener("pointercancel", endHandler);
-    stickArea.addEventListener("pointerleave", (e) => {
-      // leave 時は終了しない（外側ドラッグ可能にする）
-    });
 
     // --- アクションボタン ---
-    const bindBtn = (el, setFn) => {
-      const onDown = (e) => { e.preventDefault(); setFn(true); el.classList.add("pressed"); };
+    const bindBtn = (el, setFn, vibeMs = 0) => {
+      if (!el) return;
+      const onDown = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setFn(true);
+        el.classList.add("pressed");
+        if (vibeMs) this.vibrate(vibeMs);
+      };
       const onUp = (e) => { e.preventDefault(); setFn(false); el.classList.remove("pressed"); };
       el.addEventListener("pointerdown", onDown);
       el.addEventListener("pointerup", onUp);
       el.addEventListener("pointercancel", onUp);
       el.addEventListener("pointerleave", onUp);
+      // タッチ時のスクロール/ズーム抑制
+      el.addEventListener("touchstart", (e) => e.preventDefault(), { passive: false });
     };
-    bindBtn(this._sneakBtn, (v) => this._btnSneak = v);
+    bindBtn(this._sneakBtn, (v) => this._btnSneak = v, 8);
     bindBtn(this._dashBtn, (v) => {
       this._btnDash = v;
-      if (v) this.pressed.add(" "); // ダッシュ単発も拾えるように
-    });
+      if (v) this.pressed.add(" "); // ダッシュ単発
+    }, 14);
   }
 
   _updateStick(clientX, clientY) {
@@ -164,11 +185,11 @@ export class Input {
       this._stickKnob.style.transform = `translate(calc(-50% + ${kx}px), calc(-50% + ${ky}px))`;
     }
     // デッドゾーン
-    const dead = 10;
+    const dead = 8;
     if (d < dead) {
       this._axisX = 0; this._axisY = 0;
     } else {
-      const norm = Math.min(1, d / max);
+      const norm = Math.min(1, (d - dead) / (max - dead));
       const ang = Math.atan2(dy, dx);
       this._axisX = Math.cos(ang) * norm;
       this._axisY = Math.sin(ang) * norm;
@@ -193,6 +214,26 @@ export class Input {
   showTouchControls(show) {
     const el = document.getElementById("touch-controls");
     if (el) el.classList.toggle("active", !!show);
+  }
+
+  // スタミナ可視化（ダッシュボタンに環状で表示）
+  setStaminaDisplay(ratio01, dashReady = true) {
+    if (this._staminaRing) {
+      this._staminaRing.style.setProperty("--stamina", String(Math.max(0, Math.min(1, ratio01)) * 100));
+    }
+    if (this._dashBtn) {
+      this._dashBtn.classList.toggle("disabled", !dashReady);
+    }
+  }
+
+  vibrate(ms) {
+    if (!this.vibrateEnabled) return;
+    try { navigator.vibrate?.(ms); } catch {}
+  }
+
+  setVibrateEnabled(b) {
+    this.vibrateEnabled = !!b;
+    try { localStorage.setItem("dust-vibrate", b ? "1" : "0"); } catch {}
   }
 
   // ---------- API ----------

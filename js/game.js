@@ -1,6 +1,6 @@
 // ============================================================
 // game.js — ゲーム全体の状態管理 (Game)
-//   タイトル → プレイ → 終了 のフロー
+//   タイトル → カウントダウン → プレイ → 終了 のフロー
 //   Engine から呼ばれる update/render を担う
 // ============================================================
 
@@ -15,9 +15,14 @@ import { ParticleSystem } from "./particles.js";
 import { AudioSystem } from "./audio.js";
 import { clamp, dist, lerp, TAU } from "./utils.js";
 
-const GAME_DURATION = 180; // 3 分
-const GOAL_SIZE = 8.0;
 const COMBO_WINDOW = 1.8;   // 連続吸収許容秒数
+
+// 難易度プリセット
+export const DIFFICULTIES = {
+  easy:   { duration: 220, goal: 7.0,  humans: 1, vacuums: 0, suspicionGain: 0.85, viewDist: 200 },
+  normal: { duration: 180, goal: 8.0,  humans: 2, vacuums: 1, suspicionGain: 1.0,  viewDist: 220 },
+  hard:   { duration: 150, goal: 9.5,  humans: 2, vacuums: 2, suspicionGain: 1.3,  viewDist: 250 },
+};
 
 export class Game {
   constructor(canvas) {
@@ -40,23 +45,39 @@ export class Game {
     this.shake = 0;
     this._shakeSeed = 0;
 
-    this.state = "idle"; // idle | playing | paused | gameover | win
-    this.timeLeft = GAME_DURATION;
+    this.state = "idle"; // idle | countdown | playing | paused | gameover | win
+    this.difficulty = "normal";
+    this.diffConf = DIFFICULTIES.normal;
+    this.timeLeft = 180;
     this.elapsed = 0;
+    this.countdown = 0;
     this._ended = false;
 
     // コンボ
     this.combo = 0;
     this.comboTimer = 0;
     this.comboMult = 1;
+    this.bestCombo = 0;
 
     // 統計
     this.score = 0;
+    this.hiScore = 0;
+    try {
+      const h = localStorage.getItem("dust-hiscore");
+      if (h) this.hiScore = Number(h) || 0;
+    } catch {}
+
+    // ボーナス点ポップアップ
+    this.floatPopups = [];
 
     // UI コールバック
     this.onHud = null;
     this.onEnd = null;
     this.onCombo = null;
+    this.onFloatPop = null;     // (x, y, text, kind)
+    this.onCountdown = null;    // (n)
+    this.onFlash = null;        // (kind)
+    this.onPowerups = null;     // (powerups)
 
     this.alertLevel = 0;
     this.lastVisibility = 0;
@@ -68,6 +89,16 @@ export class Game {
     // タッチデバイスならコントロール表示
     const isTouchDevice = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
     this._isTouchDevice = isTouchDevice;
+
+    // パワーアップ自然スポーンタイマー
+    this._powerupSpawnTimer = 20; // 20秒に一度はパワーアップ確実投入
+  }
+
+  setDifficulty(name) {
+    if (DIFFICULTIES[name]) {
+      this.difficulty = name;
+      this.diffConf = DIFFICULTIES[name];
+    }
   }
 
   // ---------- ライフサイクル ----------
@@ -75,50 +106,58 @@ export class Game {
     this._ended = false;
     this.world = new World();
     this.player = new Player(160, 540);
-    this.pickups = Pickup.spawnRandom(this.world, 110);
+    this.pickups = Pickup.spawnRandom(this.world, 120);
 
-    // 巡回経路を設定 — 人間2名で難易度UP
-    this.humans = [
-      new Human(800, 400, [
+    const D = this.diffConf;
+
+    // 巡回経路 — 難易度で人数調整
+    const patrols = [
+      [
         { x: 1000, y: 400 },
         { x: 1300, y: 250 },
         { x: 1100, y: 700 },
         { x: 600, y: 700 },
         { x: 300, y: 500 },
         { x: 500, y: 250 },
-      ]),
-      new Human(1300, 720, [
+      ],
+      [
         { x: 1380, y: 700 },
         { x: 1280, y: 820 },
         { x: 1100, y: 720 },
         { x: 1220, y: 600 },
         { x: 1380, y: 660 },
-      ]),
+      ],
     ];
-    // 2人目は少し違うパーソナリティ
-    this.humans[1].shirtHue = 20; // 暖色系シャツ
-    this.humans[1].viewDist = 200;
-    this.humans[1].viewAngle = Math.PI * 0.36;
+    this.humans = [];
+    for (let i = 0; i < D.humans; i++) {
+      const startX = i === 0 ? 800 : 1300;
+      const startY = i === 0 ? 400 : 720;
+      const h = new Human(startX, startY, patrols[i % patrols.length]);
+      h.viewDist = D.viewDist + (i === 1 ? -20 : 0);
+      h.viewAngle = Math.PI * (i === 1 ? 0.36 : 0.40);
+      h.shirtHue = i === 1 ? 20 : 220;
+      h.suspicionGain = D.suspicionGain;
+      this.humans.push(h);
+    }
 
-    // ロボ掃除機 (プレイヤー初期位置から離す)
-    this.vacuums = [
-      new RobotVacuum(1200, 500),
-    ];
+    // ロボ掃除機
+    this.vacuums = [];
+    for (let i = 0; i < D.vacuums; i++) {
+      const x = i === 0 ? 1200 : 700;
+      const y = i === 0 ? 500 : 280;
+      this.vacuums.push(new RobotVacuum(x, y));
+    }
 
     this.particles = new ParticleSystem();
-    this.particles.initAmbient(this.world, 90);
+    this.particles.initAmbient(this.world, 100);
 
-    this.timeLeft = GAME_DURATION;
+    this.timeLeft = D.duration;
     this.elapsed = 0;
-    this.state = "playing";
     this.shake = 0;
+    this.floatPopups = [];
+
     // ズーム初期値は画面サイズに応じて
-    {
-      const w = this.engine.width, h = this.engine.height;
-      const minDim = Math.min(w, h);
-      this.zoom = minDim < 420 ? 0.75 : minDim < 600 ? 0.85 : minDim < 900 ? 1.0 : 1.1;
-    }
-    // カメラを即座にプレイヤーへ合わせる
+    this._updateTargetZoom(true);
     {
       const vw = this.engine.width / this.zoom;
       const vh = this.engine.height / this.zoom;
@@ -128,8 +167,10 @@ export class Game {
     this.combo = 0;
     this.comboTimer = 0;
     this.comboMult = 1;
+    this.bestCombo = 0;
     this.score = 0;
     this.alertLevel = 0;
+    this._powerupSpawnTimer = 18;
 
     // Touch UI 表示
     if (this._isTouchDevice) this.input.showTouchControls(true);
@@ -137,26 +178,29 @@ export class Game {
     this.audio.init();
     this.audio.resumeIfNeeded();
     this.audio.stopBGM();
-    setTimeout(() => {
-      if (this.state === "playing") this.audio.startBGM();
-    }, 50);
+
+    // カウントダウン開始
+    this.state = "countdown";
+    this.countdown = 3.0;
+    if (this.onCountdown) this.onCountdown(3);
 
     this.engine.start();
   }
 
   pause() {
-    if (this.state === "playing") {
+    if (this.state === "playing" || this.state === "countdown") {
+      this._pausedFrom = this.state;
       this.state = "paused";
       this.audio.setMasterMute(true);
     }
   }
   resume() {
     if (this.state === "paused") {
-      this.state = "playing";
+      this.state = this._pausedFrom || "playing";
       this.audio.setMasterMute(false);
     }
   }
-  togglePause() { this.state === "playing" ? this.pause() : this.resume(); }
+  togglePause() { (this.state === "playing" || this.state === "countdown") ? this.pause() : this.resume(); }
 
   quit() {
     this.engine.stop();
@@ -166,8 +210,51 @@ export class Game {
     this.state = "idle";
   }
 
+  _updateTargetZoom(immediate = false) {
+    const w = this.engine.width, h = this.engine.height;
+    const minDim = Math.min(w, h);
+    let target;
+    if (minDim < 380) target = 0.72;
+    else if (minDim < 480) target = 0.82;
+    else if (minDim < 640) target = 0.92;
+    else if (minDim < 900) target = 1.0;
+    else target = 1.12;
+    if (immediate) this.zoom = target;
+    return target;
+  }
+
   // ---------- 内部 update ----------
   _update(dt) {
+    // パーティクル/世界はカウントダウン中も動かす
+    if (this.state === "countdown") {
+      // カウントダウン
+      this.countdown -= dt;
+      const n = Math.ceil(this.countdown);
+      if (n !== this._lastCountdownShown && n > 0) {
+        this._lastCountdownShown = n;
+        if (this.onCountdown) this.onCountdown(n);
+        this.audio.pop(600 + (3 - n) * 100, 0.1, "triangle", 0.3);
+      }
+      if (this.countdown <= 0) {
+        this.state = "playing";
+        if (this.onCountdown) this.onCountdown("GO!");
+        this.audio.pop(900, 0.18, "triangle", 0.4);
+        setTimeout(() => {
+          if (this.state === "playing") this.audio.startBGM();
+        }, 50);
+      }
+      // 環境のみ更新
+      this.world.update(dt);
+      this.particles.update(dt, this.world);
+      // カメラはプレイヤー位置に合わせる
+      const vw = this.engine.width / this.zoom;
+      const vh = this.engine.height / this.zoom;
+      this.camX = clamp(this.player.x - vw / 2, -40, this.world.w - vw + 40);
+      this.camY = clamp(this.player.y - vh / 2, -40, this.world.h - vh + 40);
+      this.input.flush();
+      return;
+    }
+
     if (this.state !== "playing") {
       this.input.flush();
       return;
@@ -182,12 +269,19 @@ export class Game {
 
     // タイマー
     this.elapsed += dt;
-    this.timeLeft = Math.max(0, GAME_DURATION - this.elapsed);
+    this.timeLeft = Math.max(0, this.diffConf.duration - this.elapsed);
 
     // コンボタイマー減衰
     if (this.combo > 0) {
       this.comboTimer -= dt;
       if (this.comboTimer <= 0) {
+        // コンボが切れた時に大きいコンボなら時間ボーナス！
+        if (this.combo >= 8) {
+          const bonus = Math.min(8, Math.floor(this.combo / 2));
+          this.timeLeft = Math.min(this.diffConf.duration, this.timeLeft + bonus);
+          this._addPopup(this.player.x, this.player.y - 20, `+${bonus}s TIME!`, "bonus");
+          this.audio.combo(this.combo);
+        }
         this.combo = 0;
         this.comboMult = 1;
       }
@@ -197,26 +291,28 @@ export class Game {
     this.world.update(dt);
     this.player.update(dt, this.input, this.world);
 
+    // タッチUIにスタミナを反映
+    this.input.setStaminaDisplay(this.player.stamina, this.player.dashLockout <= 0 && this.player.stamina > 0.04);
+
     // ピックアップ
     for (const p of this.pickups) p.update(dt);
 
-    // 吸収判定 (プレイヤーの吸引半径)
+    // 吸収判定
     const pr = this.player.radius;
-    const pullRange = pr + 28 + this.player.size * 1.2; // サイズが大きいほど吸引範囲アップ
+    const pullRange = this.player.pullRange;
     for (let i = this.pickups.length - 1; i >= 0; i--) {
       const it = this.pickups[i];
       const d = dist(this.player.x, this.player.y, it.x, it.y);
-      // 吸引半径内なら引き寄せ
       if (d < pullRange) {
-        // 引き寄せ
         const dx = this.player.x - it.x;
         const dy = this.player.y - it.y;
         const inv = 1 / (d || 1);
-        const pullStrength = lerp(120, 480, 1 - d / pullRange);
+        const baseStrength = lerp(120, 480, 1 - d / pullRange);
+        const pullStrength = this.player.isMagnet ? baseStrength * 1.8 : baseStrength;
         it.x += dx * inv * pullStrength * dt;
         it.y += dy * inv * pullStrength * dt;
       }
-      if (d < pr + it.size * 0.4) {
+      if (d < pr + it.size * 0.4 + 4) {
         this._onAbsorb(it);
         this.pickups.splice(i, 1);
       }
@@ -226,9 +322,9 @@ export class Game {
     const brightness = this.lighting.brightnessAt(this.player.x, this.player.y, this.world);
     const sizeFactor = clamp(this.player.size / 10, 0.1, 1.5);
     let visibility = brightness * (0.55 + sizeFactor * 0.45);
-    // 家具の真下に隠れているとさらに見えにくく
     const hidden = this.world.pointInFurniture(this.player.x, this.player.y, true);
     if (hidden) visibility *= 0.22;
+    // 無敵時は人間に見えるが影響なし（視覚化は影響）
     this.lastVisibility = clamp(visibility, 0, 1);
     this.lastHidden = !!hidden;
 
@@ -240,13 +336,30 @@ export class Game {
       maxSus = Math.max(maxSus, h.suspicion);
       if (h.state === "alarm" && h.hasVacuum) anyAlarm = true;
 
-      // 接触＆掃除機起動中ならゲームオーバー
+      // 接触＆掃除機起動中ならゲームオーバー（無敵時は無効）
       if (h.hasVacuum) {
-        // 掃除機ヘッドの先端
         const ax = h.x + Math.cos(h.angle) * 40;
         const ay = h.y + Math.sin(h.angle) * 40;
         if (dist(ax, ay, this.player.x, this.player.y) < pr + 22) {
-          return this._end("lose", "掃除機に吸われてしまった…");
+          if (this.player.isInvincible) {
+            // 無敵中は人間を吹き飛ばし(疑念リセット)
+            h.suspicion = 0;
+            h.state = "patrol";
+            h.hasVacuum = false;
+            h.vacuumWindup = 0;
+            // ノックバック
+            const dx = h.x - this.player.x, dy = h.y - this.player.y;
+            const dd = Math.hypot(dx, dy) || 1;
+            h.x += (dx / dd) * 80;
+            h.y += (dy / dd) * 80;
+            this._addPopup(h.x, h.y - 30, "AVOIDED!", "bonus");
+            this.score += 200;
+            this.audio.pop(880, 0.18, "triangle", 0.35);
+            if (this.onFlash) this.onFlash("power");
+            this.input.vibrate(60);
+          } else {
+            return this._end("lose", "掃除機に吸われてしまった…");
+          }
         }
       }
     }
@@ -258,38 +371,68 @@ export class Game {
     for (const v of this.vacuums) {
       v.update(dt, this.player, this.world);
       if (dist(v.x, v.y, this.player.x, this.player.y) < pr + v.r * 0.85) {
-        return this._end("lose", "ロボット掃除機に発見されてしまった…");
+        if (this.player.isInvincible) {
+          // 跳ね返す
+          const dx = v.x - this.player.x, dy = v.y - this.player.y;
+          const dd = Math.hypot(dx, dy) || 1;
+          v.x += (dx / dd) * 100;
+          v.y += (dy / dd) * 100;
+          v.angle = Math.atan2(dy, dx);
+          this._addPopup(v.x, v.y - 24, "BUMP!", "bonus");
+          this.score += 100;
+          this.audio.pop(500, 0.2, "square", 0.3);
+          if (this.onFlash) this.onFlash("power");
+          this.input.vibrate(40);
+        } else {
+          return this._end("lose", "ロボット掃除機に発見されてしまった…");
+        }
       }
     }
 
-    // 残りピックアップが少なくなったら追加生成（ゲームを破綻させない）
-    if (this.pickups.length < 30) {
-      const more = Pickup.spawnRandom(this.world, 40);
+    // 残りピックアップが少なくなったら追加生成
+    if (this.pickups.length < 35) {
+      const more = Pickup.spawnRandom(this.world, 40, false); // 通常のみ補充
       this.pickups.push(...more);
+    }
+
+    // パワーアップ定期スポーン（不足を避ける）
+    this._powerupSpawnTimer -= dt;
+    if (this._powerupSpawnTimer <= 0) {
+      // 既存のパワーアップ数をカウント
+      const existing = this.pickups.filter(p => p.power).length;
+      if (existing < 3) {
+        const types = ["coffee", "candy", "star"];
+        const t = types[Math.floor(Math.random() * types.length)];
+        const p = Pickup.spawnPowerup(this.world, t);
+        if (p) this.pickups.push(p);
+      }
+      this._powerupSpawnTimer = 22 + Math.random() * 6;
     }
 
     // パーティクル
     this.particles.update(dt, this.world);
 
-    // ズーム計算 (スマホ縦画面のように画面が狭い場合は少し引き気味、横長は近く)
-    // 基準: 700px ビュー幅 = ズーム 1
-    const viewW = this.engine.width;
-    const viewH = this.engine.height;
-    const minDim = Math.min(viewW, viewH);
-    let targetZoom;
-    if (minDim < 420) targetZoom = 0.75;
-    else if (minDim < 600) targetZoom = 0.85;
-    else if (minDim < 900) targetZoom = 1.0;
-    else targetZoom = 1.1;
+    // フローティングポップ
+    for (let i = this.floatPopups.length - 1; i >= 0; i--) {
+      const fp = this.floatPopups[i];
+      fp.life -= dt;
+      if (fp.life <= 0) this.floatPopups.splice(i, 1);
+    }
+
+    // ズーム計算
+    const targetZoom = this._updateTargetZoom();
     this.zoom = lerp(this.zoom, targetZoom, Math.min(1, dt * 4));
 
-    // ズーム後のビュー範囲
+    const viewW = this.engine.width;
+    const viewH = this.engine.height;
     const vw = viewW / this.zoom;
     const vh = viewH / this.zoom;
 
-    // カメラ追従 (ワールド境界クランプ)
-    const targetX = this.player.x - vw / 2;
-    const targetY = this.player.y - vh / 2;
+    // カメラ追従 — 少し進行方向に「先読み」
+    const lookAheadX = this.player.vx * 0.3;
+    const lookAheadY = this.player.vy * 0.3;
+    const targetX = this.player.x + lookAheadX - vw / 2;
+    const targetY = this.player.y + lookAheadY - vh / 2;
     const camLerp = Math.min(1, dt * 5);
     this.camX = lerp(this.camX, targetX, camLerp);
     this.camY = lerp(this.camY, targetY, camLerp);
@@ -301,9 +444,12 @@ export class Game {
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 8);
     this._shakeSeed += dt;
 
+    // 危険時の振動
+    if (anyAlarm && Math.random() < dt * 2) this.input.vibrate(20);
+
     // 勝利・敗北判定
-    if (this.player.size >= GOAL_SIZE) {
-      return this._end("win", `あなたは塵の王になった。サイズ ${this.player.size.toFixed(1)}`);
+    if (this.player.size >= this.diffConf.goal) {
+      return this._end("win", `あなたは塵の王になった！ サイズ ${this.player.size.toFixed(1)}`);
     }
     if (this.timeLeft <= 0) {
       return this._end("lose", "夜明けが来てしまった… 朝には掃除されてしまう。");
@@ -312,16 +458,19 @@ export class Game {
     // HUD 更新
     if (this.onHud) this.onHud({
       size: this.player.size,
-      sizeMax: GOAL_SIZE,
+      sizeMax: this.diffConf.goal,
       alert: this.alertLevel,
       timeLeft: this.timeLeft,
-      goal: GOAL_SIZE,
+      goal: this.diffConf.goal,
       absorbed: this.player.absorbed,
       hidden: this.lastHidden,
       visibility: this.lastVisibility,
       combo: this.combo,
       score: this.score,
+      stamina: this.player.stamina,
+      powerups: this.player.powerups,
     });
+    if (this.onPowerups) this.onPowerups(this.player.powerups);
 
     this.input.flush();
   }
@@ -331,16 +480,35 @@ export class Game {
     // コンボ
     this.combo++;
     this.comboTimer = COMBO_WINDOW;
-    this.comboMult = 1 + Math.min(2, (this.combo - 1) * 0.12); // 最大3倍
+    this.comboMult = 1 + Math.min(2.5, (this.combo - 1) * 0.14); // 最大3.5倍
+    if (this.combo > this.bestCombo) this.bestCombo = this.combo;
 
     // プレイヤー側の吸収 (倍率込み)
     this.player.absorb(item, this.comboMult);
-    this.score += Math.floor(10 * item.nutrition * 30 * this.comboMult);
+    const points = Math.floor(10 * item.nutrition * 30 * this.comboMult);
+    this.score += points + (item.bonus || 0);
+
+    // パワーアップ取得 -> 派手にフィードバック
+    if (item.power) {
+      this._addPopup(item.x, item.y - 14, this._powerName(item.power) + "!", "power");
+      this.audio.pop(1100, 0.15, "triangle", 0.35);
+      setTimeout(() => this.audio.pop(1600, 0.12, "sine", 0.25), 60);
+      if (this.onFlash) this.onFlash("power");
+      this.input.vibrate(40);
+    } else if (item.bonus) {
+      this._addPopup(item.x, item.y - 14, `+${item.bonus}`, "bonus");
+    } else if (this.combo >= 2) {
+      // 通常も小さくポップ
+      this._addPopup(item.x, item.y - 8, `+${points}`, "");
+    }
 
     // パーティクル
-    this.particles.burst(item.x, item.y, 10, {
+    this.particles.burst(item.x, item.y, item.power ? 18 : 10, {
       color: item.type === "hair" ? "rgba(120,100,80,1)"
             : item.type === "crumb" ? "rgba(255,200,120,1)"
+            : item.type === "coffee" ? "rgba(180,110,50,1)"
+            : item.type === "candy" ? "rgba(255,150,180,1)"
+            : item.type === "star" ? "rgba(255,220,120,1)"
             : "rgba(232,220,180,1)"
     });
 
@@ -348,12 +516,28 @@ export class Game {
     this.audio.absorb(this.player.size);
     if (this.combo >= 3 && this.combo % 3 === 0) {
       this.audio.combo(this.combo);
+      if (this.onFlash) this.onFlash("good");
     }
 
     // UI コンボ
     if (this.combo >= 2 && this.onCombo) {
       this.onCombo({ combo: this.combo, mult: this.comboMult });
     }
+  }
+
+  _powerName(p) {
+    switch (p) {
+      case "speed": return "☕ SPEED UP";
+      case "invincible": return "🍬 INVINCIBLE";
+      case "magnet": return "⭐ MAGNET";
+      default: return "POWER";
+    }
+  }
+
+  // ポップアップ追加 (ワールド座標)
+  _addPopup(x, y, text, kind = "") {
+    this.floatPopups.push({ x, y, text, kind, life: 1.0, age: 0 });
+    if (this.onFloatPop) this.onFloatPop({ x, y, text, kind });
   }
 
   _end(result, desc) {
@@ -363,6 +547,15 @@ export class Game {
     this.audio.stopBGM();
     if (result === "win") this.audio.victory();
     else { this.audio.gameOver(); this.audio.vacuumNoise(); }
+
+    // ハイスコア更新
+    let newBest = false;
+    if (this.score > this.hiScore) {
+      this.hiScore = this.score;
+      newBest = true;
+      try { localStorage.setItem("dust-hiscore", String(this.hiScore)); } catch {}
+    }
+
     if (this.onEnd) this.onEnd({
       result,
       desc,
@@ -370,10 +563,12 @@ export class Game {
       absorbed: this.player.absorbed,
       elapsed: this.elapsed,
       score: this.score,
+      hiScore: this.hiScore,
+      newBest,
+      bestCombo: this.bestCombo,
+      difficulty: this.difficulty,
     });
-    // タッチUI非表示
     this.input.showTouchControls(false);
-    // エンジン停止 (少し遅延 — 最後のフレームを表示するため)
     setTimeout(() => this.engine.stop(), 1500);
   }
 
@@ -391,76 +586,62 @@ export class Game {
     ctx.fillStyle = "#04040a";
     ctx.fillRect(0, 0, w, h);
 
-    // カメラ揺れ (ワールド単位)
+    // カメラ揺れ
     const shx = this.shake ? (Math.sin(this._shakeSeed * 47) * this.shake) : 0;
     const shy = this.shake ? (Math.cos(this._shakeSeed * 53) * this.shake) : 0;
     const cx = this.camX + shx;
     const cy = this.camY + shy;
 
-    // ---- ワールド変換 (zoom) 適用 ----
+    // ---- ワールド変換 (zoom) ----
     ctx.save();
     ctx.scale(z, z);
 
-    // ベースレイヤー
     this.world.drawFloor(ctx, cx, cy, vw, vh);
     this.world.drawShadows(ctx, cx, cy);
     this.world.drawFurniture(ctx, cx, cy);
 
-    // ピックアップ
     for (const p of this.pickups) p.draw(ctx, cx, cy);
 
-    // 環境パーティクル(床より上)
     this.particles.draw(ctx, cx, cy);
 
-    // プレイヤー
     this.player.drawNoiseRing(ctx, cx, cy);
     this.player.draw(ctx, cx, cy);
 
-    // 人間と掃除機（本体）
     for (const human of this.humans) human.draw(ctx, cx, cy);
     for (const v of this.vacuums) v.draw(ctx, cx, cy);
 
     ctx.restore();
 
-    // ---- ライティングは画面サイズで合成 ----
-    // lighting は darkCanvas に viewW/viewH で描画後 ctx.drawImage(0,0) で乗せる方式。
-    // zoom 適用時は ctx の transform を一時的に解除して 1:1 で乗せた方が正確。
-    // ここでは lighting 内部の世界座標を z で扱うため、 zoom 込みのワールド座標→画面座標変換を渡す。
+    // ---- ライティング ----
     ctx.save();
     ctx.scale(z, z);
     this.lighting.render(ctx, this.world, cx, cy, vw, vh, this.player);
     ctx.restore();
 
-    // === ライティングの "上" に描画するもの (zoom 付き) ===
+    // ライティングの上 (zoom 付き)
     ctx.save();
     ctx.scale(z, z);
-    // 視界コーンはゲームメカニクスとして常に見えるべき
     for (const human of this.humans) human.drawVisionCone(ctx, cx, cy);
-    // プレイヤーのアウトライン
     this._drawPlayerOutline(ctx, cx, cy);
-    // 吸引範囲インジケータ
     this._drawPullIndicator(ctx, cx, cy);
-    // 疑念アイコン
     for (const human of this.humans) {
       if (human.suspicion > 0.1) {
         human._drawSuspicionIcon(ctx, human.x - cx, human.y - cy - 44);
       }
     }
+    // ゴール矢印（プレイヤーから最寄りのパワーアップへ）
+    this._drawPowerupArrows(ctx, cx, cy, vw, vh);
+    // フローティングポップ (ワールド座標)
+    this._drawFloatPopups(ctx, cx, cy);
     ctx.restore();
 
     // === HUD / UI (zoom 適用しない) ===
-    // 方向矢印 (画面外の敵) — 画面サイズ基準
     this._drawOffscreenIndicators(ctx, w, h, cx, cy, z);
-    // ミニマップ
     this._drawMinimap(ctx, w, h);
-    // スコア表示
-    this._drawScore(ctx, w, h);
-    // 序盤のチュートリアルヒント
-    if (this.elapsed < 7) this._drawTutorial(ctx, w, h);
-    // 警告メッセージ
+    if (this.elapsed < 8 && this.state === "playing") this._drawTutorial(ctx, w, h);
     this._drawWarnings(ctx, w, h);
 
-    // ポーズ時の灰色オーバーレイ
+    // ポーズ
     if (this.state === "paused") {
       ctx.fillStyle = "rgba(0,0,0,0.45)";
       ctx.fillRect(0, 0, w, h);
@@ -474,12 +655,14 @@ export class Game {
     ctx.save();
     ctx.globalCompositeOperation = "screen";
 
-    // 内側の柔らかい光
     const g = ctx.createRadialGradient(px, py, 0, px, py, r * 1.8);
     const isHidden = this.lastHidden;
-    if (isHidden) {
-      g.addColorStop(0, "rgba(138,166,180,0.5)");
-      g.addColorStop(1, "rgba(138,166,180,0)");
+    if (this.player.isInvincible) {
+      g.addColorStop(0, "rgba(255,220,120,0.7)");
+      g.addColorStop(1, "rgba(255,220,120,0)");
+    } else if (isHidden) {
+      g.addColorStop(0, "rgba(138,200,180,0.55)");
+      g.addColorStop(1, "rgba(138,200,180,0)");
     } else {
       const danger = this.lastVisibility ?? 0.5;
       const r1 = Math.floor(217 + danger * 30);
@@ -501,11 +684,11 @@ export class Game {
     ctx.stroke();
     ctx.restore();
 
-    // 隠れている時の "SAFE" インジケータ
+    // HIDDEN ラベル
     if (isHidden) {
       ctx.save();
       ctx.font = "bold 11px var(--font-en), serif";
-      ctx.fillStyle = "rgba(138,200,180,0.9)";
+      ctx.fillStyle = "rgba(138,200,180,0.95)";
       ctx.textAlign = "center";
       ctx.shadowColor = "rgba(0,0,0,0.8)";
       ctx.shadowBlur = 4;
@@ -514,15 +697,13 @@ export class Game {
     }
   }
 
-  // 吸引範囲インジケータ (うっすら)
   _drawPullIndicator(ctx, cx, cy) {
     const px = this.player.x - cx;
     const py = this.player.y - cy;
-    const r = this.player.radius;
-    const range = r + 28 + this.player.size * 1.2;
+    const range = this.player.pullRange;
     ctx.save();
     ctx.globalCompositeOperation = "screen";
-    ctx.strokeStyle = "rgba(217,200,158,0.08)";
+    ctx.strokeStyle = this.player.isMagnet ? "rgba(255,220,120,0.18)" : "rgba(217,200,158,0.08)";
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 6]);
     ctx.beginPath();
@@ -532,10 +713,77 @@ export class Game {
     ctx.restore();
   }
 
-  // 画面外の脅威を示す矢印 (画面座標で描画)
+  _drawFloatPopups(ctx, cx, cy) {
+    for (const fp of this.floatPopups) {
+      const t = 1 - fp.life;
+      const px = fp.x - cx;
+      const py = fp.y - cy - t * 26;
+      const alpha = fp.life > 0.7 ? 1 : Math.max(0, fp.life / 0.7);
+      let color = "rgba(232,224,196," + alpha + ")";
+      if (fp.kind === "power") color = "rgba(195,155,211," + alpha + ")";
+      else if (fp.kind === "bonus") color = "rgba(255,229,144," + alpha + ")";
+      else if (fp.kind === "danger") color = "rgba(217,74,74," + alpha + ")";
+      ctx.save();
+      ctx.font = "bold 14px var(--font-en), serif";
+      ctx.textAlign = "center";
+      ctx.fillStyle = `rgba(0,0,0,${0.7 * alpha})`;
+      ctx.fillText(fp.text, px + 1, py + 1);
+      ctx.fillStyle = color;
+      ctx.fillText(fp.text, px, py);
+      ctx.restore();
+    }
+  }
+
+  // パワーアップへの方向矢印（画面外時）
+  _drawPowerupArrows(ctx, cx, cy, vw, vh) {
+    // 画面内に1個もパワーアップがない場合のみ表示
+    const screenLeft = cx - 20, screenTop = cy - 20;
+    const screenRight = cx + vw + 20, screenBottom = cy + vh + 20;
+    const visible = this.pickups.some(p => p.power &&
+      p.x >= screenLeft && p.x <= screenRight && p.y >= screenTop && p.y <= screenBottom);
+    if (visible) return;
+
+    // プレイヤーに最も近いパワーアップ
+    let nearest = null;
+    let nearestD = Infinity;
+    for (const p of this.pickups) {
+      if (!p.power) continue;
+      const d = dist(p.x, p.y, this.player.x, this.player.y);
+      if (d < nearestD) { nearestD = d; nearest = p; }
+    }
+    if (!nearest || nearestD > 600) return;
+
+    // プレイヤー周囲に小さい矢印
+    const angle = Math.atan2(nearest.y - this.player.y, nearest.x - this.player.x);
+    const r = this.player.radius + 28;
+    const px = this.player.x + Math.cos(angle) * r - cx;
+    const py = this.player.y + Math.sin(angle) * r - cy;
+    const pulse = 0.5 + Math.sin(this.elapsed * 6) * 0.5;
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(angle);
+    ctx.globalAlpha = 0.6 + pulse * 0.4;
+    let col = "#c39bd3";
+    if (nearest.type === "coffee") col = "#b88060";
+    else if (nearest.type === "candy") col = "#ff80a8";
+    else if (nearest.type === "star") col = "#ffd450";
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(8, 0);
+    ctx.lineTo(-4, -5);
+    ctx.lineTo(-1, 0);
+    ctx.lineTo(-4, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 画面外の脅威矢印
   _drawOffscreenIndicators(ctx, w, h, cx, cy, z = 1) {
     const drawArrow = (sx, sy, color) => {
-      // sx,sy は画面上の対象座標
       const ang = Math.atan2(sy - h / 2, sx - w / 2);
       const r = Math.min(w, h) * 0.42;
       const ax = w / 2 + Math.cos(ang) * r;
@@ -552,7 +800,6 @@ export class Game {
       ctx.lineTo(-18, 9);
       ctx.closePath();
       ctx.fill();
-      // 縁取り
       ctx.strokeStyle = "rgba(0,0,0,0.5)";
       ctx.lineWidth = 1.2;
       ctx.stroke();
@@ -580,23 +827,8 @@ export class Game {
     }
   }
 
-  _drawScore(ctx, w, h) {
-    ctx.save();
-    ctx.font = "11px var(--font-en), serif";
-    ctx.textAlign = "right";
-    ctx.fillStyle = "rgba(232,224,196,0.6)";
-    const text = `SCORE  ${this.score.toLocaleString()}`;
-    const x = w - 20;
-    const y = h - 16 - 100 - 8; // minimap上
-    ctx.shadowColor = "rgba(0,0,0,0.6)";
-    ctx.shadowBlur = 3;
-    ctx.fillText(text, x, y);
-    ctx.restore();
-  }
-
   // ----- ミニマップ -----
   _drawMinimap(ctx, w, h) {
-    // 画面サイズに応じて縮小
     const small = Math.min(w, h) < 500;
     const mw = small ? 110 : 160;
     const mh = small ? 70 : 100;
@@ -606,7 +838,6 @@ export class Game {
     const sy = mh / this.world.h;
 
     ctx.save();
-    // 背景
     ctx.fillStyle = "rgba(8,8,14,0.78)";
     ctx.strokeStyle = "rgba(232,224,196,0.3)";
     ctx.lineWidth = 1;
@@ -615,14 +846,13 @@ export class Game {
     ctx.fill();
     ctx.stroke();
 
-    // 家具
     ctx.fillStyle = "rgba(180,170,150,0.4)";
     for (const f of this.world.furniture) {
       if (!f.def.blocks) continue;
       ctx.fillRect(x0 + f.x * sx, y0 + f.y * sy, f.w * sx, f.h * sy);
     }
 
-    // 光源（薄く）
+    // 光源
     for (const l of this.world.lights) {
       const lx = x0 + l.x * sx;
       const ly = y0 + l.y * sy;
@@ -635,14 +865,26 @@ export class Game {
       ctx.fill();
     }
 
-    // 人間（赤）
+    // パワーアップ
+    for (const p of this.pickups) {
+      if (!p.power) continue;
+      let col = "#c39bd3";
+      if (p.type === "coffee") col = "#b88060";
+      else if (p.type === "candy") col = "#ff80a8";
+      else if (p.type === "star") col = "#ffd450";
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(x0 + p.x * sx, y0 + p.y * sy, 2.5, 0, TAU);
+      ctx.fill();
+    }
+
+    // 人間
     for (const human of this.humans) {
       ctx.fillStyle = human.state === "patrol" ? "rgba(220,200,150,0.9)" :
                        human.state === "alarm"  ? "rgba(220,80,80,1)" : "rgba(240,160,96,1)";
       ctx.beginPath();
       ctx.arc(x0 + human.x * sx, y0 + human.y * sy, 3.5, 0, TAU);
       ctx.fill();
-      // 視界方向
       ctx.strokeStyle = ctx.fillStyle;
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -660,12 +902,11 @@ export class Game {
       ctx.fill();
     }
 
-    // プレイヤー（金）
+    // プレイヤー
     ctx.fillStyle = "rgba(232,220,150,1)";
     ctx.beginPath();
     ctx.arc(x0 + this.player.x * sx, y0 + this.player.y * sy, 3.8, 0, TAU);
     ctx.fill();
-    // パルス
     const pulse = (Math.sin(this.elapsed * 4) * 0.5 + 0.5);
     ctx.strokeStyle = `rgba(232,220,150,${0.6 - pulse * 0.3})`;
     ctx.lineWidth = 1;
@@ -699,7 +940,8 @@ export class Game {
     if (!msg) return;
     ctx.save();
     const pulse = 0.7 + Math.sin(this.elapsed * 6) * 0.3;
-    ctx.font = "bold 18px var(--font-jp), sans-serif";
+    const fontSize = Math.min(w, h) < 500 ? 14 : 18;
+    ctx.font = `bold ${fontSize}px var(--font-jp), sans-serif`;
     ctx.textAlign = "center";
     ctx.fillStyle = "rgba(0,0,0,0.7)";
     ctx.fillText(msg, w / 2 + 1, 110 + 1);
@@ -711,28 +953,28 @@ export class Game {
   // ----- チュートリアル -----
   _drawTutorial(ctx, w, h) {
     const t = this.elapsed;
-    const fade = t < 5.5 ? 1 : Math.max(0, 1 - (t - 5.5));
+    const fade = t < 6.5 ? 1 : Math.max(0, 1 - (t - 6.5));
     if (fade <= 0) return;
 
     ctx.save();
     ctx.globalAlpha = fade;
-    ctx.font = "13px var(--font-jp), sans-serif";
+    const fontSize = Math.min(w, h) < 500 ? 12 : 13;
+    ctx.font = `${fontSize}px var(--font-jp), sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
     const lines = this._isTouchDevice ? [
       "🕹️ 左下のスティックで移動",
-      "🤫 SNEAK で静かに  ・  ⚡ DASH で速く（音が大きい）",
-      "家具の影に隠れて、人間の視界を避けろ",
+      "🤫 SNEAK で静かに  ・  ⚡ DASH で速く（スタミナ消費）",
+      "🛋️ 家具の影に隠れて、人間の視界を避けろ",
     ] : [
       "WASD / 矢印キーで移動",
-      "Shift で静かに歩く  ・  Space でダッシュ（音が大きい）",
+      "Shift で静かに歩く  ・  Space でダッシュ（スタミナ消費）",
       "家具の影に隠れて、人間の視界を避けろ",
     ];
-    // タッチデバイスでは少し上に配置（操作UIを避けるため）
     const yBase = this._isTouchDevice ? h - 240 : h - 150;
     lines.forEach((line, i) => {
-      const y = yBase + i * 22;
+      const y = yBase + i * (fontSize + 8);
       ctx.fillStyle = "rgba(0,0,0,0.75)";
       ctx.fillText(line, w / 2 + 1, y + 1);
       ctx.fillStyle = "rgba(232,224,196,0.95)";

@@ -48,6 +48,7 @@ export class Human {
     this.pantsColor = choose(["#1a1820", "#2a2828", "#1a2030"]);
     this.hasVacuum = false;
     this.vacuumWindup = 0; // 0-1 起動中
+    this.suspicionGain = 1.0; // 難易度倍率
   }
 
   // 視界コーン内にプレイヤーがいて、遮蔽物がない場合 true
@@ -85,18 +86,19 @@ export class Human {
     const d = dist(this.x, this.y, player.x, player.y);
     const heard = player.noise * Math.max(0, 1 - d / 350);
 
+    const gain = this.suspicionGain;
     if (see) {
-      this.suspicion += dt * (1.2 + visibility) * (1 + player.size * 0.05);
+      this.suspicion += dt * (1.2 + visibility) * (1 + player.size * 0.05) * gain;
       this.lastSeenX = player.x;
       this.lastSeenY = player.y;
       this.alertness = 1;
     } else if (heard > 0.2) {
-      this.suspicion += dt * heard * 0.7;
+      this.suspicion += dt * heard * 0.7 * gain;
       this.lastSeenX = player.x;
       this.lastSeenY = player.y;
       this.alertness = Math.min(1, this.alertness + dt * 0.5);
     } else {
-      this.suspicion -= dt * 0.18;
+      this.suspicion -= dt * 0.22;
       this.alertness = Math.max(0, this.alertness - dt * 0.4);
     }
     this.suspicion = clamp(this.suspicion, 0, 1);

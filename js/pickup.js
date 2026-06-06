@@ -1,19 +1,27 @@
 // ============================================================
 // pickup.js — 床に落ちている吸収アイテム
-//   種類:
-//     dust    - 小さいホコリ（よく落ちている）
-//     hair    - 髪の毛（長い）
-//     crumb   - 食べカス（栄養多い）
-//     fluff   - 大きめの綿ぼこり（高栄養）
+//   通常:
+//     dust    - 小さいホコリ
+//     hair    - 髪の毛
+//     crumb   - 食べカス
+//     fluff   - 大きめの綿ぼこり
+//   特殊 (パワーアップ):
+//     coffee  - コーヒー粒 (一時スピードアップ)
+//     candy   - キャンディ (一時無敵)
+//     star    - スター (ボーナス点 + マグネット)
 // ============================================================
 
 import { rand, randInt, TAU, choose } from "./utils.js";
 
 const PICKUP_TYPES = {
-  dust:  { nutrition: 0.10, weight: 60, color: "#a8a08c", size: [3, 5] },
-  hair:  { nutrition: 0.18, weight: 25, color: "#15110c", size: [10, 22] },
-  crumb: { nutrition: 0.35, weight: 12, color: "#c89a5a", size: [4, 7] },
-  fluff: { nutrition: 0.55, weight: 6,  color: "#d4cdb6", size: [7, 11] },
+  dust:   { nutrition: 0.10, weight: 60, color: "#a8a08c", size: [3, 5],   power: null },
+  hair:   { nutrition: 0.18, weight: 25, color: "#15110c", size: [10, 22], power: null },
+  crumb:  { nutrition: 0.35, weight: 12, color: "#c89a5a", size: [4, 7],   power: null },
+  fluff:  { nutrition: 0.55, weight: 6,  color: "#d4cdb6", size: [7, 11],  power: null },
+  // パワーアップ系 (稀に出現)
+  coffee: { nutrition: 0.25, weight: 1.6, color: "#3b1f12", size: [6, 8],   power: "speed",      duration: 5.0 },
+  candy:  { nutrition: 0.20, weight: 1.2, color: "#ff5c8a", size: [7, 9],   power: "invincible", duration: 4.0 },
+  star:   { nutrition: 0.40, weight: 0.9, color: "#ffd450", size: [8, 11],  power: "magnet",     duration: 6.0, bonus: 500 },
 };
 
 export class Pickup {
@@ -27,13 +35,15 @@ export class Pickup {
     this.angle = rand(0, TAU);
     this.t = rand(0, 100);
     this.alive = true;
+    this.power = def.power;
+    this.duration = def.duration || 0;
+    this.bonus = def.bonus || 0;
 
     // 描画用パラメータ
     if (type === "hair") {
       this.curve = rand(-0.6, 0.6);
     }
     if (type === "dust") {
-      // 小さいぼこ → 数個の点
       this.subs = [];
       const n = randInt(2, 4);
       for (let i = 0; i < n; i++) {
@@ -47,9 +57,9 @@ export class Pickup {
   }
 
   // アイテム生成ヘルパー
-  static spawnRandom(world, count = 60) {
+  static spawnRandom(world, count = 60, allowPower = true) {
     const items = [];
-    const types = Object.keys(PICKUP_TYPES);
+    const types = Object.keys(PICKUP_TYPES).filter(t => allowPower || !PICKUP_TYPES[t].power);
     const weights = types.map(t => PICKUP_TYPES[t].weight);
     const totalW = weights.reduce((a, b) => a + b, 0);
 
@@ -72,6 +82,19 @@ export class Pickup {
     return items;
   }
 
+  // 単体パワーアップを保証スポーン
+  static spawnPowerup(world, type) {
+    let attempts = 0;
+    while (attempts < 200) {
+      attempts++;
+      const x = rand(60, world.w - 60);
+      const y = rand(60, world.h - 60);
+      if (world.pointInFurniture(x, y, true)) continue;
+      return new Pickup(x, y, type);
+    }
+    return null;
+  }
+
   update(dt) {
     this.t += dt;
   }
@@ -82,24 +105,34 @@ export class Pickup {
     ctx.save();
     ctx.translate(cx, cy);
 
-    // 微かな自己発光（暗闇でも完全には消えないよう）— ライティング前に描画される
+    // 微かな自己発光（暗闇でも完全には消えないよう）
     const pulse = 0.6 + Math.sin(this.t * 2) * 0.2;
-    const glowR = this.size * 2.2;
+    const isPower = !!this.power;
+    const glowR = this.size * (isPower ? 3.6 : 2.2);
     const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
-    const glowCol = this.type === "hair" ? "60,60,72" : "232,220,180";
-    glow.addColorStop(0, `rgba(${glowCol},${0.18 * pulse})`);
+    let glowCol = "232,220,180";
+    if (this.type === "hair") glowCol = "60,60,72";
+    else if (this.type === "coffee") glowCol = "150,90,40";
+    else if (this.type === "candy")  glowCol = "255,140,180";
+    else if (this.type === "star")   glowCol = "255,210,100";
+    const glowAlpha = isPower ? 0.32 * pulse : 0.18 * pulse;
+    glow.addColorStop(0, `rgba(${glowCol},${glowAlpha})`);
     glow.addColorStop(1, `rgba(${glowCol},0)`);
     ctx.fillStyle = glow;
     ctx.beginPath();
     ctx.arc(0, 0, glowR, 0, TAU);
     ctx.fill();
 
+    // パワーアップは大きく揺れる
+    if (isPower) {
+      const bob = Math.sin(this.t * 3) * 1.5;
+      ctx.translate(0, bob);
+    }
+
     ctx.rotate(this.angle);
 
     if (this.type === "dust") {
-      // 小さい綿玉
       const r = this.size;
-      // ふわっとオーラ
       const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 1.6);
       g.addColorStop(0, "rgba(200,192,170,0.35)");
       g.addColorStop(1, "rgba(200,192,170,0)");
@@ -107,7 +140,6 @@ export class Pickup {
       ctx.beginPath();
       ctx.arc(0, 0, r * 1.6, 0, TAU);
       ctx.fill();
-      // メインの粒
       for (const s of this.subs) {
         ctx.fillStyle = `rgba(180,170,148,0.9)`;
         ctx.beginPath();
@@ -115,7 +147,6 @@ export class Pickup {
         ctx.fill();
       }
     } else if (this.type === "hair") {
-      // くねっと曲がる線
       const len = this.size;
       const c = this.curve;
       ctx.strokeStyle = this.color;
@@ -129,12 +160,10 @@ export class Pickup {
          len / 2, 0
       );
       ctx.stroke();
-      // ハイライト
       ctx.strokeStyle = "rgba(80,72,60,0.7)";
       ctx.lineWidth = 0.5;
       ctx.stroke();
     } else if (this.type === "crumb") {
-      // 不定形の粒
       ctx.fillStyle = this.color;
       const r = this.size;
       ctx.beginPath();
@@ -148,13 +177,11 @@ export class Pickup {
       }
       ctx.closePath();
       ctx.fill();
-      // ハイライト
       ctx.fillStyle = "rgba(255,235,180,0.5)";
       ctx.beginPath();
       ctx.arc(-r * 0.2, -r * 0.2, r * 0.3, 0, TAU);
       ctx.fill();
     } else if (this.type === "fluff") {
-      // 大きい綿玉
       const r = this.size;
       const aura = ctx.createRadialGradient(0, 0, r * 0.2, 0, 0, r * 1.5);
       aura.addColorStop(0, "rgba(220,212,190,0.55)");
@@ -175,6 +202,110 @@ export class Pickup {
       ctx.beginPath();
       ctx.arc(0, 0, r * 0.45, 0, TAU);
       ctx.fill();
+    } else if (this.type === "coffee") {
+      // コーヒー豆
+      const r = this.size;
+      // 豆の本体（楕円）
+      const g = ctx.createRadialGradient(-r * 0.3, -r * 0.3, 0, 0, 0, r);
+      g.addColorStop(0, "#7a4520");
+      g.addColorStop(1, "#1f0d05");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, r, r * 0.7, 0, 0, TAU);
+      ctx.fill();
+      // 真ん中の溝
+      ctx.strokeStyle = "rgba(20,10,5,0.9)";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.85, 0);
+      ctx.quadraticCurveTo(0, -r * 0.15, r * 0.85, 0);
+      ctx.stroke();
+      // ハイライト
+      ctx.fillStyle = "rgba(255,210,160,0.4)";
+      ctx.beginPath();
+      ctx.ellipse(-r * 0.3, -r * 0.25, r * 0.3, r * 0.15, 0, 0, TAU);
+      ctx.fill();
+    } else if (this.type === "candy") {
+      // キャンディ (横長カラフルラッピング)
+      const r = this.size;
+      // 中央のキャンディ
+      const g = ctx.createRadialGradient(-r * 0.3, -r * 0.3, 0, 0, 0, r);
+      g.addColorStop(0, "#ffaccc");
+      g.addColorStop(1, "#ff4080");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.7, 0, TAU);
+      ctx.fill();
+      // 両側のラッピング (三角)
+      ctx.fillStyle = "#ff80a8";
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.6, 0);
+      ctx.lineTo(-r * 1.3, -r * 0.5);
+      ctx.lineTo(-r * 1.3, r * 0.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(r * 0.6, 0);
+      ctx.lineTo(r * 1.3, -r * 0.5);
+      ctx.lineTo(r * 1.3, r * 0.5);
+      ctx.closePath();
+      ctx.fill();
+      // ハイライト
+      ctx.fillStyle = "rgba(255,255,255,0.6)";
+      ctx.beginPath();
+      ctx.ellipse(-r * 0.2, -r * 0.25, r * 0.2, r * 0.1, 0, 0, TAU);
+      ctx.fill();
+      // ラインアート (ストライプ)
+      ctx.strokeStyle = "rgba(255,255,255,0.45)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.2, -r * 0.6);
+      ctx.quadraticCurveTo(0, 0, r * 0.2, r * 0.6);
+      ctx.stroke();
+    } else if (this.type === "star") {
+      // 星型
+      const r = this.size;
+      const spin = this.t * 1.2;
+      ctx.rotate(spin - this.angle); // 自分の angle 補正で常に回転
+      const points = 5;
+      // 外側オーラ
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 1.5);
+      g.addColorStop(0, "rgba(255,220,120,0.5)");
+      g.addColorStop(1, "rgba(255,220,120,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 1.5, 0, TAU);
+      ctx.fill();
+      // 星本体
+      ctx.fillStyle = "#ffd450";
+      ctx.beginPath();
+      for (let i = 0; i < points * 2; i++) {
+        const a = (i / (points * 2)) * TAU - Math.PI / 2;
+        const rr = (i % 2 === 0) ? r : r * 0.45;
+        const x = Math.cos(a) * rr;
+        const y = Math.sin(a) * rr;
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      // 中央ハイライト
+      ctx.fillStyle = "rgba(255,255,200,0.85)";
+      ctx.beginPath();
+      ctx.arc(-r * 0.15, -r * 0.15, r * 0.2, 0, TAU);
+      ctx.fill();
+      // 縁取り
+      ctx.strokeStyle = "rgba(255,180,60,0.9)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      for (let i = 0; i < points * 2; i++) {
+        const a = (i / (points * 2)) * TAU - Math.PI / 2;
+        const rr = (i % 2 === 0) ? r : r * 0.45;
+        const x = Math.cos(a) * rr;
+        const y = Math.sin(a) * rr;
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.stroke();
     }
 
     ctx.restore();

@@ -13,28 +13,56 @@ export class UI {
     this.sizeFill = document.getElementById("hud-size-fill");
     this.sizeText = document.getElementById("hud-size-text");
     this.alertFill = document.getElementById("hud-alert-fill");
+    this.staminaFill = document.getElementById("hud-stamina-fill");
     this.timeText = document.getElementById("hud-time");
     this.goalText = document.getElementById("hud-goal");
+    this.scoreText = document.getElementById("hud-score");
+    this.stealthEl = document.getElementById("hud-stealth");
+    this.stealthIcon = document.getElementById("stealth-icon");
+    this.stealthLabel = document.getElementById("stealth-label");
     this.alertOverlay = document.getElementById("alert-overlay");
     this.pauseOverlay = document.getElementById("pause-overlay");
     this.comboEl = document.getElementById("combo-display");
     this.comboValueEl = document.getElementById("combo-value");
+    this.powerupBar = document.getElementById("powerup-bar");
+    this.floatPopupsEl = document.getElementById("float-popups");
+    this.countdownEl = document.getElementById("countdown");
+    this.flashOverlay = document.getElementById("flash-overlay");
+
+    // Pause stats
+    this.pauseSize = document.getElementById("pause-size");
+    this.pauseScore = document.getElementById("pause-score");
+    this.pauseTime = document.getElementById("pause-time");
 
     // End screen
     this.endTitle = document.getElementById("end-title");
+    this.endEmoji = document.getElementById("end-emoji");
     this.endDesc = document.getElementById("end-desc");
     this.endSize = document.getElementById("end-size");
     this.endCount = document.getElementById("end-count");
     this.endTime = document.getElementById("end-time");
     this.endScore = document.getElementById("end-score");
+    this.endBestLine = document.getElementById("end-best-line");
+
+    // Title highscore
+    this.titleHiscore = document.getElementById("title-highscore");
+    this.hsValue = document.getElementById("hs-value");
+    this._refreshHiScore();
 
     // 内部
     this._comboFadeTimer = 0;
+    this._lastHud = {};
+    this._powerupChips = {}; // { speed: el, invincible: el, magnet: el }
+    this._powerupLabels = {
+      speed: { icon: "☕", label: "SPEED", cls: "speed" },
+      invincible: { icon: "🍬", label: "SHIELD", cls: "invincible" },
+      magnet: { icon: "⭐", label: "MAGNET", cls: "magnet" },
+    };
 
     // タイトル装飾パーティクル
     this._initTitleParticles();
 
-    // resize 時にも再生成（縦横切り替え対応）
+    // resize 時にも再生成
     let rt;
     window.addEventListener("resize", () => {
       clearTimeout(rt);
@@ -42,11 +70,21 @@ export class UI {
     });
   }
 
+  _refreshHiScore() {
+    try {
+      const h = Number(localStorage.getItem("dust-hiscore") || 0);
+      if (h > 0 && this.titleHiscore && this.hsValue) {
+        this.titleHiscore.style.display = "inline-flex";
+        this.hsValue.textContent = h.toLocaleString();
+      }
+    } catch {}
+  }
+
   _initTitleParticles() {
     const root = document.getElementById("title-particles");
     if (!root) return;
     root.innerHTML = "";
-    const n = window.innerWidth < 480 ? 24 : 40;
+    const n = window.innerWidth < 480 ? 24 : 44;
     for (let i = 0; i < n; i++) {
       const s = document.createElement("span");
       const left = Math.random() * 100;
@@ -72,12 +110,16 @@ export class UI {
     this.titleScreen.classList.add("active");
     this.gameScreen.classList.remove("active");
     this.endScreen.classList.remove("active");
+    this._refreshHiScore();
   }
   showGame() {
     this.titleScreen.classList.remove("active");
     this.gameScreen.classList.add("active");
     this.endScreen.classList.remove("active");
     this.pauseOverlay.classList.remove("active");
+    // パワーアップバー初期化
+    if (this.powerupBar) this.powerupBar.innerHTML = "";
+    this._powerupChips = {};
   }
   showEnd(data) {
     this.gameScreen.classList.remove("active");
@@ -86,9 +128,11 @@ export class UI {
     if (data.result === "win") {
       this.endTitle.textContent = "YOU WIN";
       this.endTitle.className = "win";
+      if (this.endEmoji) this.endEmoji.textContent = "👑";
     } else {
       this.endTitle.textContent = "GAME OVER";
       this.endTitle.className = "lose";
+      if (this.endEmoji) this.endEmoji.textContent = "💀";
     }
     this.endDesc.textContent = data.desc || "";
     this.endSize.textContent = data.size.toFixed(1);
@@ -97,11 +141,39 @@ export class UI {
     const s = Math.floor(data.elapsed % 60).toString().padStart(2, "0");
     this.endTime.textContent = `${m}:${s}`;
     if (this.endScore) this.endScore.textContent = (data.score || 0).toLocaleString();
+
+    // ベストスコア表示
+    if (this.endBestLine) {
+      if (data.newBest) {
+        this.endBestLine.textContent = `🏆 NEW BEST!  /  最高コンボ x${data.bestCombo || 0}`;
+        this.endBestLine.classList.add("newbest");
+      } else {
+        this.endBestLine.textContent = `BEST  ${(data.hiScore || 0).toLocaleString()}  /  最高コンボ x${data.bestCombo || 0}`;
+        this.endBestLine.classList.remove("newbest");
+      }
+    }
+
+    // タイトル画面のハイスコアも更新
+    this._refreshHiScore();
   }
 
   setPaused(p) {
-    if (p) this.pauseOverlay.classList.add("active");
-    else this.pauseOverlay.classList.remove("active");
+    if (p) {
+      this.pauseOverlay.classList.add("active");
+      // 統計反映
+      if (this._lastHud) {
+        if (this.pauseSize) this.pauseSize.textContent = (this._lastHud.size ?? 0).toFixed(1);
+        if (this.pauseScore) this.pauseScore.textContent = (this._lastHud.score ?? 0).toLocaleString();
+        if (this.pauseTime) {
+          const tl = this._lastHud.timeLeft ?? 0;
+          const m = Math.floor(tl / 60);
+          const s = Math.floor(tl % 60).toString().padStart(2, "0");
+          this.pauseTime.textContent = `${m}:${s}`;
+        }
+      }
+    } else {
+      this.pauseOverlay.classList.remove("active");
+    }
   }
 
   showCombo({ combo, mult }) {
@@ -119,10 +191,14 @@ export class UI {
   }
 
   updateHud(d) {
+    this._lastHud = d;
     const pct = Math.min(1, d.size / d.sizeMax);
     this.sizeFill.style.width = (pct * 100).toFixed(1) + "%";
     this.sizeText.textContent = d.size.toFixed(1);
     this.alertFill.style.width = (d.alert * 100).toFixed(1) + "%";
+    if (this.staminaFill) {
+      this.staminaFill.style.width = (Math.max(0, Math.min(1, d.stamina ?? 1)) * 100).toFixed(1) + "%";
+    }
 
     const m = Math.floor(d.timeLeft / 60);
     const s = Math.floor(d.timeLeft % 60).toString().padStart(2, "0");
@@ -130,6 +206,33 @@ export class UI {
     this.timeText.classList.toggle("danger", d.timeLeft < 30);
 
     this.goalText.textContent = d.goal.toFixed(1);
+
+    if (this.scoreText) this.scoreText.textContent = (d.score ?? 0).toLocaleString();
+
+    // ステルス度表示
+    if (this.stealthEl) {
+      this.stealthEl.classList.remove("hidden", "dim", "exposed", "spotted");
+      if (d.alert >= 0.85) {
+        this.stealthEl.classList.add("spotted");
+        this.stealthIcon.textContent = "🚨";
+        this.stealthLabel.textContent = "SPOTTED";
+      } else if (d.hidden) {
+        this.stealthEl.classList.add("hidden");
+        this.stealthIcon.textContent = "👻";
+        this.stealthLabel.textContent = "HIDDEN";
+      } else if (d.visibility < 0.35) {
+        this.stealthEl.classList.add("dim");
+        this.stealthIcon.textContent = "🌙";
+        this.stealthLabel.textContent = "DIM";
+      } else {
+        this.stealthEl.classList.add("exposed");
+        this.stealthIcon.textContent = "👁";
+        this.stealthLabel.textContent = "EXPOSED";
+      }
+    }
+
+    // パワーアップ表示
+    this._updatePowerups(d.powerups || {});
 
     // アラート枠
     if (d.alert >= 0.85) {
@@ -139,6 +242,56 @@ export class UI {
     } else {
       this.alertOverlay.className = "alert-overlay";
     }
+  }
+
+  _updatePowerups(powerups) {
+    if (!this.powerupBar) return;
+    const keys = Object.keys(this._powerupLabels);
+    for (const k of keys) {
+      const remain = powerups[k] || 0;
+      let chip = this._powerupChips[k];
+      if (remain > 0) {
+        if (!chip) {
+          chip = document.createElement("div");
+          chip.className = "powerup-chip " + this._powerupLabels[k].cls;
+          chip.innerHTML = `
+            <span class="pu-icon">${this._powerupLabels[k].icon}</span>
+            <span class="pu-name">${this._powerupLabels[k].label}</span>
+            <span class="pu-time">0.0s</span>
+          `;
+          this.powerupBar.appendChild(chip);
+          this._powerupChips[k] = chip;
+        }
+        const tEl = chip.querySelector(".pu-time");
+        if (tEl) tEl.textContent = remain.toFixed(1) + "s";
+      } else if (chip) {
+        chip.remove();
+        delete this._powerupChips[k];
+      }
+    }
+  }
+
+  // 中央のカウントダウン
+  showCountdown(n) {
+    if (!this.countdownEl) return;
+    this.countdownEl.textContent = (n === "GO!" || typeof n === "string") ? n : String(n);
+    this.countdownEl.classList.remove("active");
+    void this.countdownEl.offsetWidth;
+    this.countdownEl.classList.add("active");
+    clearTimeout(this._cdHide);
+    this._cdHide = setTimeout(() => {
+      this.countdownEl.classList.remove("active");
+    }, 1000);
+  }
+
+  // フラッシュ
+  flash(kind = "good") {
+    if (!this.flashOverlay) return;
+    this.flashOverlay.className = "flash-overlay " + kind;
+    clearTimeout(this._flashHide);
+    this._flashHide = setTimeout(() => {
+      this.flashOverlay.className = "flash-overlay";
+    }, 140);
   }
 
   showModal(id) {

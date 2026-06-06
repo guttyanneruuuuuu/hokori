@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no, maximum-scale=1.0" />
   <title>DUST — ほこりサバイバル</title>
   <meta name="description" content="ホコリ視点のステルス・サバイバル・ゲーム" />
   <meta name="theme-color" content="#07070a" />
@@ -13,31 +13,56 @@
   <link rel="stylesheet" href="css/style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;700;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Zen+Kaku+Gothic+New:wght@400;700;900&display=swap" rel="stylesheet">
 </head>
 <body>
   <!-- ====== タイトル画面 ====== -->
   <section id="title-screen" class="screen active">
     <div class="title-bg"></div>
+    <div class="title-vignette"></div>
     <div class="dust-particles" id="title-particles"></div>
 
     <div class="title-content">
-      <h1 class="title-main">
-        <span class="title-word">D</span><span class="title-word">U</span><span class="title-word">S</span><span class="title-word">T</span>
-      </h1>
+      <div class="title-logo">
+        <div class="title-mascot" aria-hidden="true">
+          <div class="mascot-body">
+            <div class="mascot-eye left"></div>
+            <div class="mascot-eye right"></div>
+            <div class="mascot-mouth"></div>
+          </div>
+          <div class="mascot-shadow"></div>
+        </div>
+        <h1 class="title-main">
+          <span class="title-word">D</span><span class="title-word">U</span><span class="title-word">S</span><span class="title-word">T</span>
+        </h1>
+      </div>
       <p class="title-sub">— ほこりサバイバル —</p>
       <p class="title-tagline">
         あなたは床の片隅で生まれた小さなホコリ。<br/>
-        掃除機に吸われる前に、仲間を吸収して "塵の王" を目指せ。
+        闇に紛れ、仲間を吸収し、"塵の王" を目指せ。
       </p>
 
-      <div class="title-menu">
-        <button class="menu-btn primary" id="btn-start">ゲームを始める</button>
-        <button class="menu-btn" id="btn-howto">遊び方</button>
-        <button class="menu-btn" id="btn-credits">クレジット</button>
+      <div class="title-highscore" id="title-highscore" style="display:none">
+        <span class="hs-label">BEST</span>
+        <span class="hs-value" id="hs-value">0</span>
       </div>
 
-      <p class="title-hint">音が出ます — ヘッドホン推奨 🎧</p>
+      <div class="title-menu">
+        <button class="menu-btn primary" id="btn-start">
+          <span class="btn-icon">▶</span> ゲームを始める
+        </button>
+        <div class="diff-selector" role="radiogroup" aria-label="難易度">
+          <button class="diff-btn" data-diff="easy">かんたん</button>
+          <button class="diff-btn active" data-diff="normal">ふつう</button>
+          <button class="diff-btn" data-diff="hard">むずかしい</button>
+        </div>
+        <div class="title-menu-row">
+          <button class="menu-btn slim" id="btn-howto">遊び方</button>
+          <button class="menu-btn slim" id="btn-credits">クレジット</button>
+        </div>
+      </div>
+
+      <p class="title-hint">🎧 ヘッドホン推奨 ・ 縦/横どちらでも遊べます</p>
     </div>
   </section>
 
@@ -47,24 +72,27 @@
       <h2>遊び方</h2>
       <h3>PC操作</h3>
       <ul class="howto-list">
-        <li><kbd>WASD</kbd> / <kbd>矢印</kbd> &nbsp;移動</li>
-        <li><kbd>Shift</kbd>（押している間）&nbsp;静かに歩く（音が小さい）</li>
-        <li><kbd>Space</kbd> &nbsp;ダッシュ（速いが目立つ）</li>
+        <li><kbd>WASD</kbd> / <kbd>↑↓←→</kbd> &nbsp;移動</li>
+        <li><kbd>Shift</kbd>（押している間）&nbsp;しのび足（音が小さい）</li>
+        <li><kbd>Space</kbd> &nbsp;ダッシュ（速いがスタミナ消費・うるさい）</li>
         <li><kbd>P</kbd> / <kbd>Esc</kbd> &nbsp;ポーズ</li>
       </ul>
       <h3>スマホ操作</h3>
       <ul class="howto-list">
         <li>🕹️ 左下のジョイスティック &nbsp;移動</li>
-        <li>🤫 SNEAK ボタン &nbsp;静かに歩く</li>
+        <li>🤫 SNEAK ボタン &nbsp;しのび足</li>
         <li>⚡ DASH ボタン &nbsp;ダッシュ</li>
+        <li>📱 縦持ち・横持ちどちらでも遊べます</li>
       </ul>
       <h3>ルール</h3>
       <ul class="howto-list">
-        <li>🌫️ 床のホコリ・髪の毛・食べカスを吸収して大きくなる</li>
-        <li>🔥 連続吸収で <strong>コンボボーナス</strong> 発生！</li>
+        <li>🌫️ 床のホコリ・髪の毛・食べカスを吸収して大きくなろう</li>
+        <li>🔥 連続吸収で <strong>コンボ</strong> 発生！得点とサイズが急上昇</li>
         <li>🕯️ 明るい場所では人間に発見されやすい — 影に隠れろ</li>
-        <li>👁️ 人間や掃除ロボットの <strong>視界コーン</strong> に入ると警戒される</li>
-        <li>🚨 警戒が最大になると掃除機が起動 — 吸われたらゲームオーバー</li>
+        <li>🛋️ 家具の下に潜れば <strong>HIDDEN</strong>（見えない安全地帯）</li>
+        <li>👁️ 人間や掃除ロボットの <strong>視界コーン</strong> に入らないように</li>
+        <li>🚨 警戒MAXで掃除機起動 — 吸われたらゲームオーバー</li>
+        <li>⭐ 特殊アイテム — ☕コーヒー粒（高速化） 🍬キャンディ（無敵） ⭐スター（ボーナス）</li>
         <li>🏆 制限時間内に目標サイズに到達すればクリア！</li>
       </ul>
       <button class="menu-btn" data-close-modal>閉じる</button>
@@ -77,7 +105,7 @@
       <h2>クレジット</h2>
       <p>Design &amp; Code: <strong>guttyanneruuuuuu</strong></p>
       <p>Built with Vanilla JS + HTML5 Canvas</p>
-      <p class="muted">No external libraries. All graphics & sound are procedural.</p>
+      <p class="muted">外部ライブラリ非使用 / すべてのグラフィック・音はプロシージャル生成</p>
       <button class="menu-btn" data-close-modal>閉じる</button>
     </div>
   </div>
@@ -96,24 +124,51 @@
           <span class="hud-label">ALERT</span>
           <div class="hud-bar alert"><div class="hud-bar-fill" id="hud-alert-fill"></div></div>
         </div>
+        <div class="hud-row">
+          <span class="hud-label">STAMINA</span>
+          <div class="hud-bar stamina"><div class="hud-bar-fill" id="hud-stamina-fill"></div></div>
+        </div>
       </div>
       <div class="hud-center">
         <div class="hud-time" id="hud-time">3:00</div>
-        <div class="hud-goal">GOAL: <span id="hud-goal">8.0</span></div>
+        <div class="hud-goal">GOAL <span id="hud-goal">8.0</span></div>
+        <div class="hud-stealth" id="hud-stealth">
+          <span class="stealth-icon" id="stealth-icon">👁</span>
+          <span class="stealth-label" id="stealth-label">EXPOSED</span>
+        </div>
       </div>
       <div class="hud-right">
-        <button class="hud-btn" id="btn-pause" title="Pause (P)">⏸</button>
+        <div class="hud-score">
+          <span class="score-label">SCORE</span>
+          <span class="score-value" id="hud-score">0</span>
+        </div>
+        <button class="hud-btn" id="btn-pause" title="Pause (P)" aria-label="ポーズ">⏸</button>
       </div>
     </div>
 
+    <!-- パワーアップ表示 -->
+    <div class="powerup-bar" id="powerup-bar"></div>
+
     <!-- 警告オーバーレイ -->
     <div class="alert-overlay" id="alert-overlay"></div>
+
+    <!-- ビネット -->
+    <div class="screen-vignette"></div>
 
     <!-- コンボ表示 -->
     <div class="combo-display" id="combo-display">
       <span class="combo-value" id="combo-value">x2</span>
       <span class="combo-label">COMBO</span>
     </div>
+
+    <!-- フローティング得点ポップ -->
+    <div class="float-popups" id="float-popups"></div>
+
+    <!-- カウントダウン -->
+    <div class="countdown" id="countdown"></div>
+
+    <!-- フラッシュ (吸収・ダメージ) -->
+    <div class="flash-overlay" id="flash-overlay"></div>
 
     <!-- メインキャンバス -->
     <canvas id="game-canvas"></canvas>
@@ -122,16 +177,32 @@
     <div class="pause-overlay" id="pause-overlay">
       <div class="pause-content">
         <h2>PAUSED</h2>
-        <button class="menu-btn primary" id="btn-resume">再開</button>
+        <div class="pause-stats">
+          <div><span>SIZE</span><strong id="pause-size">0</strong></div>
+          <div><span>SCORE</span><strong id="pause-score">0</strong></div>
+          <div><span>TIME</span><strong id="pause-time">0:00</strong></div>
+        </div>
+        <button class="menu-btn primary" id="btn-resume">▶ 再開</button>
         <button class="menu-btn" id="btn-restart">最初から</button>
         <button class="menu-btn" id="btn-quit">タイトルへ</button>
+        <label class="setting-row">
+          <span>音量</span>
+          <input type="range" id="vol-slider" min="0" max="100" value="60" />
+        </label>
+        <label class="setting-row">
+          <input type="checkbox" id="vibrate-toggle" checked />
+          <span>バイブレーション</span>
+        </label>
       </div>
     </div>
   </section>
 
   <!-- ====== ゲームオーバー / クリア ====== -->
   <section id="end-screen" class="screen">
+    <div class="end-bg"></div>
+    <div class="end-particles" id="end-particles"></div>
     <div class="end-content">
+      <div class="end-emoji" id="end-emoji">💀</div>
       <h1 id="end-title">GAME OVER</h1>
       <p id="end-desc"></p>
       <div class="end-stats">
@@ -140,8 +211,9 @@
         <div><span>生存時間</span><strong id="end-time">0:00</strong></div>
         <div><span>スコア</span><strong id="end-score">0</strong></div>
       </div>
+      <p class="best-line" id="end-best-line"></p>
       <div class="end-menu">
-        <button class="menu-btn primary" id="btn-retry">もう一度</button>
+        <button class="menu-btn primary" id="btn-retry">🔄 もう一度</button>
         <button class="menu-btn" id="btn-back-title">タイトルへ</button>
       </div>
     </div>
