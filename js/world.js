@@ -223,13 +223,39 @@ export class World {
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, this.w, this.h);
 
-    // 壁の影（境界）
-    ctx.fillStyle = "rgba(0,0,0,0.7)";
-    const bw = 24;
+    // 壁（ベースボード = 巾木）
+    const bw = 22;
+    // 黒い影部分
+    ctx.fillStyle = "#050407";
     ctx.fillRect(0, 0, this.w, bw);
     ctx.fillRect(0, this.h - bw, this.w, bw);
     ctx.fillRect(0, 0, bw, this.h);
     ctx.fillRect(this.w - bw, 0, bw, this.h);
+
+    // 巾木のハイライト
+    ctx.fillStyle = "#1a1612";
+    ctx.fillRect(0, bw - 4, this.w, 4);
+    ctx.fillRect(0, this.h - bw, this.w, 4);
+    ctx.fillRect(bw - 4, 0, 4, this.h);
+    ctx.fillRect(this.w - bw, 0, 4, this.h);
+    // 微かな反射
+    ctx.fillStyle = "rgba(217,200,158,0.04)";
+    ctx.fillRect(0, bw - 1, this.w, 1);
+    ctx.fillRect(bw - 1, 0, 1, this.h);
+
+    // 部屋を分ける薄い線（ゾーン区分の暗示）
+    ctx.strokeStyle = "rgba(0,0,0,0.4)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 8]);
+    ctx.beginPath();
+    ctx.moveTo(1010, 30);
+    ctx.lineTo(1010, this.h - 30);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(1010, 480);
+    ctx.lineTo(this.w - 30, 480);
+    ctx.stroke();
+    ctx.setLineDash([]);
 
     ctx.restore();
   }

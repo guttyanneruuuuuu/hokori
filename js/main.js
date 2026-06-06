@@ -6,11 +6,35 @@
 import { Game } from "./game.js";
 import { UI } from "./ui.js";
 
+// --- Polyfill: CanvasRenderingContext2D.roundRect ---
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+    if (typeof r === "number") r = [r, r, r, r];
+    else if (Array.isArray(r)) {
+      if (r.length === 1) r = [r[0], r[0], r[0], r[0]];
+      else if (r.length === 2) r = [r[0], r[1], r[0], r[1]];
+      else if (r.length === 3) r = [r[0], r[1], r[2], r[1]];
+    } else r = [0, 0, 0, 0];
+    const [tl, tr, br, bl] = r;
+    this.moveTo(x + tl, y);
+    this.lineTo(x + w - tr, y);
+    this.quadraticCurveTo(x + w, y, x + w, y + tr);
+    this.lineTo(x + w, y + h - br);
+    this.quadraticCurveTo(x + w, y + h, x + w - br, y + h);
+    this.lineTo(x + bl, y + h);
+    this.quadraticCurveTo(x, y + h, x, y + h - bl);
+    this.lineTo(x, y + tl);
+    this.quadraticCurveTo(x, y, x + tl, y);
+    return this;
+  };
+}
+
 const canvas = document.getElementById("game-canvas");
 const ui = new UI();
 const game = new Game(canvas);
 
 game.onHud = (d) => ui.updateHud(d);
+game.onCombo = (d) => ui.showCombo(d);
 game.onEnd = (d) => {
   // 少し待ってから End 画面へ
   setTimeout(() => ui.showEnd(d), 700);
@@ -36,13 +60,14 @@ document.querySelectorAll(".modal").forEach(m => {
 });
 
 // ---- ポーズ ----
+const syncPauseUI = () => ui.setPaused(game.state === "paused");
 document.getElementById("btn-pause").addEventListener("click", () => {
   game.togglePause();
-  ui.setPaused(game.state === "paused");
+  syncPauseUI();
 });
 document.getElementById("btn-resume").addEventListener("click", () => {
   game.resume();
-  ui.setPaused(false);
+  syncPauseUI();
 });
 document.getElementById("btn-restart").addEventListener("click", () => {
   ui.setPaused(false);
@@ -54,10 +79,14 @@ document.getElementById("btn-quit").addEventListener("click", () => {
   ui.showTitle();
 });
 
-// game.state の更新を監視して pause UI を同期
-setInterval(() => {
-  ui.setPaused(game.state === "paused");
-}, 100);
+// キーボード入力からのポーズ同期 (Escがmenuボタン押されたとき)
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" || e.key === "p" || e.key === "P") {
+    if (game.state === "playing" || game.state === "paused") {
+      requestAnimationFrame(syncPauseUI);
+    }
+  }
+});
 
 // ---- End screen ----
 document.getElementById("btn-retry").addEventListener("click", () => {
@@ -77,7 +106,20 @@ const initAudio = () => {
   game.audio.init();
   game.audio.resumeIfNeeded();
   window.removeEventListener("click", initAudio);
+  window.removeEventListener("touchstart", initAudio);
   window.removeEventListener("keydown", initAudio);
 };
 window.addEventListener("click", initAudio);
+window.addEventListener("touchstart", initAudio, { passive: true });
 window.addEventListener("keydown", initAudio);
+
+// Prevent zoom-by-double-tap on mobile (better game UX)
+let lastTap = 0;
+document.addEventListener("touchend", (e) => {
+  const now = Date.now();
+  if (now - lastTap < 300) e.preventDefault();
+  lastTap = now;
+}, { passive: false });
+
+// Prevent pinch zoom inside game area
+document.addEventListener("gesturestart", (e) => e.preventDefault());

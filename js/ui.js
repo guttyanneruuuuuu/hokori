@@ -17,6 +17,8 @@ export class UI {
     this.goalText = document.getElementById("hud-goal");
     this.alertOverlay = document.getElementById("alert-overlay");
     this.pauseOverlay = document.getElementById("pause-overlay");
+    this.comboEl = document.getElementById("combo-display");
+    this.comboValueEl = document.getElementById("combo-value");
 
     // End screen
     this.endTitle = document.getElementById("end-title");
@@ -24,16 +26,27 @@ export class UI {
     this.endSize = document.getElementById("end-size");
     this.endCount = document.getElementById("end-count");
     this.endTime = document.getElementById("end-time");
+    this.endScore = document.getElementById("end-score");
+
+    // 内部
+    this._comboFadeTimer = 0;
 
     // タイトル装飾パーティクル
     this._initTitleParticles();
+
+    // resize 時にも再生成（縦横切り替え対応）
+    let rt;
+    window.addEventListener("resize", () => {
+      clearTimeout(rt);
+      rt = setTimeout(() => this._initTitleParticles(), 200);
+    });
   }
 
   _initTitleParticles() {
     const root = document.getElementById("title-particles");
     if (!root) return;
     root.innerHTML = "";
-    const n = 36;
+    const n = window.innerWidth < 480 ? 24 : 40;
     for (let i = 0; i < n; i++) {
       const s = document.createElement("span");
       const left = Math.random() * 100;
@@ -83,11 +96,26 @@ export class UI {
     const m = Math.floor(data.elapsed / 60);
     const s = Math.floor(data.elapsed % 60).toString().padStart(2, "0");
     this.endTime.textContent = `${m}:${s}`;
+    if (this.endScore) this.endScore.textContent = (data.score || 0).toLocaleString();
   }
 
   setPaused(p) {
     if (p) this.pauseOverlay.classList.add("active");
     else this.pauseOverlay.classList.remove("active");
+  }
+
+  showCombo({ combo, mult }) {
+    if (!this.comboEl) return;
+    if (combo < 2) return;
+    this.comboValueEl.textContent = `x${combo}`;
+    // re-trigger animation
+    this.comboEl.classList.remove("active");
+    void this.comboEl.offsetWidth;
+    this.comboEl.classList.add("active");
+    clearTimeout(this._comboHide);
+    this._comboHide = setTimeout(() => {
+      this.comboEl.classList.remove("active");
+    }, 900);
   }
 
   updateHud(d) {

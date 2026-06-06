@@ -20,9 +20,11 @@ export class AudioSystem {
     if (this._started) return;
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) { console.warn("AudioContext not supported"); return; }
       this.ctx = new AC();
       this.master = this.ctx.createGain();
       this.master.gain.value = 0.6;
+      this._masterTarget = 0.6;
       this.master.connect(this.ctx.destination);
 
       this.bgmGain = this.ctx.createGain();
@@ -220,5 +222,23 @@ export class AudioSystem {
     notes.forEach((n, i) => {
       setTimeout(() => this.pop(n, 0.25, "triangle", 0.3), i * 110);
     });
+  }
+
+  // コンボ効果音
+  combo(n = 3) {
+    if (!this.ctx) return;
+    const base = 700 + Math.min(8, n) * 60;
+    this.pop(base, 0.08, "triangle", 0.22);
+    setTimeout(() => this.pop(base * 1.25, 0.08, "sine", 0.18), 50);
+    setTimeout(() => this.pop(base * 1.5, 0.1, "sine", 0.14), 110);
+  }
+
+  // 一時ミュート
+  setMasterMute(mute) {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    this.master.gain.cancelScheduledValues(t);
+    const target = mute ? 0 : (this._masterTarget ?? 0.6);
+    this.master.gain.setTargetAtTime(target, t, 0.12);
   }
 }
