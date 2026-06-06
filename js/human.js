@@ -21,14 +21,14 @@ export class Human {
     this.angle = 0;
     this.r = 18;          // 体の半径（衝突は弱め）
     this.speed = 60;
-    this.runSpeed = 130;
+    this.runSpeed = 140;  // 追跡速度を強化
 
     this.patrol = patrolPoints.length ? patrolPoints : [{ x, y }];
     this.patrolIdx = 0;
     this.waitTimer = 0;
 
-    this.viewAngle = Math.PI * 0.40;  // 視界の半角 (=合計80度)
-    this.viewDist  = 220;
+    this.viewAngle = Math.PI * 0.42;  // 視界の半角を拡大 (=合計84度)
+    this.viewDist  = 240;  // 視界距離を拡大
 
     // AI 状態
     this.state = "patrol";   // patrol | look | investigate | alarm
@@ -64,8 +64,8 @@ export class Human {
     const diff = Math.abs(angleDiff(this.angle, a));
     if (diff > this.viewAngle) return false;
 
-    // 視覚的可視性が低いと見えない
-    const minVis = 0.15 + (d / this.viewDist) * 0.25; // 遠いほどよく見えない
+    // 視覚的可視性が低いと見えない（検出閾値を下げる）
+    const minVis = 0.12 + (d / this.viewDist) * 0.2;  // より見つけやすく
     if (visibility < minVis) return false;
 
     // 遮蔽
@@ -88,25 +88,28 @@ export class Human {
 
     const gain = this.suspicionGain;
     if (see) {
-      this.suspicion += dt * (1.2 + visibility) * (1 + player.size * 0.05) * gain;
+      // 視認時の疑念増加を強化
+      this.suspicion += dt * (1.4 + visibility * 0.8) * (1 + player.size * 0.08) * gain;
       this.lastSeenX = player.x;
       this.lastSeenY = player.y;
       this.alertness = 1;
     } else if (heard > 0.2) {
-      this.suspicion += dt * heard * 0.7 * gain;
+      // 聴覚による疑念増加
+      this.suspicion += dt * heard * 0.8 * gain;
       this.lastSeenX = player.x;
       this.lastSeenY = player.y;
-      this.alertness = Math.min(1, this.alertness + dt * 0.5);
+      this.alertness = Math.min(1, this.alertness + dt * 0.6);
     } else {
-      this.suspicion -= dt * 0.22;
-      this.alertness = Math.max(0, this.alertness - dt * 0.4);
+      // 疑念減衰を遅くする（より長く警戒を保つ）
+      this.suspicion -= dt * 0.18;
+      this.alertness = Math.max(0, this.alertness - dt * 0.3);
     }
     this.suspicion = clamp(this.suspicion, 0, 1);
 
     // ---- 状態遷移 ----
-    if (this.suspicion >= 0.95) this.state = "alarm";
-    else if (this.suspicion >= 0.55) this.state = "investigate";
-    else if (this.suspicion >= 0.2) this.state = "look";
+    if (this.suspicion >= 0.90) this.state = "alarm";  // 警戒閾値を下げる
+    else if (this.suspicion >= 0.50) this.state = "investigate";  // 調査閾値を下げる
+    else if (this.suspicion >= 0.15) this.state = "look";  // 注視閾値を下げる
     else this.state = "patrol";
 
     // ---- 行動 ----
@@ -127,23 +130,23 @@ export class Human {
       }
     } else if (this.state === "look") {
       this.hasVacuum = false;
-      // 立ち止まってきょろきょろ見回す
+      // 立ち止まってきょろきょろ見回す（より積極的に）
       moveSpeed = 0;
       this.lookSweepT += dt;
       const baseAngle = Math.atan2(this.lastSeenY - this.y, this.lastSeenX - this.x);
-      const sweep = Math.sin(this.lookSweepT * 1.3) * 0.55;
-      targetX = this.x + Math.cos(baseAngle + sweep) * 100;
-      targetY = this.y + Math.sin(baseAngle + sweep) * 100;
+      const sweep = Math.sin(this.lookSweepT * 1.5) * 0.7;  // 振幅を拡大
+      targetX = this.x + Math.cos(baseAngle + sweep) * 120;  // 探索範囲を拡大
+      targetY = this.y + Math.sin(baseAngle + sweep) * 120;
     } else if (this.state === "investigate") {
       this.hasVacuum = false;
       targetX = this.lastSeenX; targetY = this.lastSeenY;
-      moveSpeed = this.speed;
+      moveSpeed = this.speed * 1.1;  // 調査速度を上げる
     } else { // alarm
-      // 掃除機を取り出す（windupの間ゆっくり）
-      this.vacuumWindup = Math.min(1, this.vacuumWindup + dt * 0.7);
-      this.hasVacuum = this.vacuumWindup >= 1;
+      // 掃除機を取り出す（windupを高速化）
+      this.vacuumWindup = Math.min(1, this.vacuumWindup + dt * 0.9);  // 起動を高速化
+      this.hasVacuum = this.vacuumWindup >= 0.95;  // より早く起動
       targetX = player.x; targetY = player.y;
-      moveSpeed = this.hasVacuum ? this.runSpeed : this.speed * 0.6;
+      moveSpeed = this.hasVacuum ? this.runSpeed : this.speed * 0.8;  // 準備中も速く
     }
 
     // ---- 移動 ----
@@ -159,9 +162,9 @@ export class Human {
 
     // 向き
     if (this.state === "look") {
-      // 振り向き：ターゲット方向にゆっくり向く
+      // 振り向き：ターゲット方向にゆっくり向く（より敏感に）
       const target = Math.atan2(targetY - this.y, targetX - this.x);
-      this.angle += angleDiff(this.angle, target) * Math.min(1, dt * 3);
+      this.angle += angleDiff(this.angle, target) * Math.min(1, dt * 4);  // 反応速度向上
     } else if (Math.abs(this.vx) + Math.abs(this.vy) > 5) {
       this.angle = Math.atan2(this.vy, this.vx);
     }

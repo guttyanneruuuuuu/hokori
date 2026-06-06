@@ -328,6 +328,20 @@ export class Game {
     this.lastVisibility = clamp(visibility, 0, 1);
     this.lastHidden = !!hidden;
 
+    // 隠密ボーナス: 暗い場所で長く隠れているとスコアボーナス
+    if (hidden && brightness < 0.3 && this.alertLevel < 0.3) {
+      this._stealthBonusTimer = (this._stealthBonusTimer || 0) + dt;
+      if (this._stealthBonusTimer >= 3.0) {
+        const bonus = Math.floor(this._stealthBonusTimer / 3.0) * 50;
+        this.score += bonus;
+        this._addPopup(this.player.x, this.player.y - 30, `+${bonus} STEALTH!`, "stealth");
+        this._stealthBonusTimer = 0;
+        this.input.vibrate(12);
+      }
+    } else {
+      this._stealthBonusTimer = 0;
+    }
+
     // 人間 NPC
     let maxSus = 0;
     let anyAlarm = false;

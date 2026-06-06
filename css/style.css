@@ -782,6 +782,7 @@ kbd {
 }
 .float-pop.power  { color: var(--accent-3); }
 .float-pop.bonus  { color: #ffe590; font-size: 18px; }
+.float-pop.stealth { color: #8aa6a3; font-size: 17px; font-weight: 900; text-shadow: 0 0 12px rgba(138,166,163,0.6); }
 .float-pop.danger { color: var(--danger); }
 @keyframes floatPop {
   0%   { opacity: 0; transform: translate(-50%, -40%) scale(0.7); }
