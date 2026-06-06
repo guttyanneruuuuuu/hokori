@@ -293,6 +293,12 @@ export class Game {
       }
     }
 
+    // ミニマップ
+    this._drawMinimap(ctx, w, h);
+
+    // 序盤のチュートリアルヒント
+    if (this.elapsed < 6) this._drawTutorial(ctx, w, h);
+
     // ポーズ時の灰色オーバーレイ
     if (this.state === "paused") {
       ctx.fillStyle = "rgba(0,0,0,0.4)";
@@ -345,5 +351,118 @@ export class Game {
       ctx.fillText("HIDDEN", px, py - r - 8);
       ctx.restore();
     }
+  }
+
+  // ----- ミニマップ -----
+  _drawMinimap(ctx, w, h) {
+    const mw = 160, mh = 100;
+    const x0 = w - mw - 16;
+    const y0 = h - mh - 16;
+    const sx = mw / this.world.w;
+    const sy = mh / this.world.h;
+
+    ctx.save();
+    // 背景
+    ctx.fillStyle = "rgba(10,10,16,0.7)";
+    ctx.strokeStyle = "rgba(232,224,196,0.25)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(x0, y0, mw, mh, 4);
+    ctx.fill();
+    ctx.stroke();
+
+    // 家具
+    ctx.fillStyle = "rgba(180,170,150,0.35)";
+    for (const f of this.world.furniture) {
+      if (!f.def.blocks) continue;
+      ctx.fillRect(x0 + f.x * sx, y0 + f.y * sy, f.w * sx, f.h * sy);
+    }
+
+    // 光源（薄く）
+    for (const l of this.world.lights) {
+      const lx = x0 + l.x * sx;
+      const ly = y0 + l.y * sy;
+      const g = ctx.createRadialGradient(lx, ly, 0, lx, ly, l.radius * sx);
+      g.addColorStop(0, "rgba(255,220,160,0.4)");
+      g.addColorStop(1, "rgba(255,220,160,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(lx, ly, l.radius * sx, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 人間（赤）
+    for (const human of this.humans) {
+      ctx.fillStyle = human.state === "patrol" ? "rgba(220,200,150,0.9)" :
+                       human.state === "alarm"  ? "rgba(220,80,80,1)" : "rgba(240,160,96,1)";
+      ctx.beginPath();
+      ctx.arc(x0 + human.x * sx, y0 + human.y * sy, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      // 視界方向
+      ctx.strokeStyle = ctx.fillStyle;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x0 + human.x * sx, y0 + human.y * sy);
+      ctx.lineTo(x0 + human.x * sx + Math.cos(human.angle) * 8,
+                 y0 + human.y * sy + Math.sin(human.angle) * 8);
+      ctx.stroke();
+    }
+
+    // ロボ掃除機
+    for (const v of this.vacuums) {
+      ctx.fillStyle = "rgba(220,80,80,0.9)";
+      ctx.beginPath();
+      ctx.arc(x0 + v.x * sx, y0 + v.y * sy, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // プレイヤー（金）
+    ctx.fillStyle = "rgba(232,220,150,1)";
+    ctx.beginPath();
+    ctx.arc(x0 + this.player.x * sx, y0 + this.player.y * sy, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    // パルス
+    const pulse = (Math.sin(this.elapsed * 4) * 0.5 + 0.5);
+    ctx.strokeStyle = `rgba(232,220,150,${0.6 - pulse * 0.3})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x0 + this.player.x * sx, y0 + this.player.y * sy, 4 + pulse * 4, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // タイトル
+    ctx.font = "10px var(--font-en), serif";
+    ctx.fillStyle = "rgba(232,224,196,0.5)";
+    ctx.textAlign = "left";
+    ctx.fillText("MAP", x0 + 6, y0 - 4);
+
+    ctx.restore();
+  }
+
+  // ----- チュートリアル -----
+  _drawTutorial(ctx, w, h) {
+    const t = this.elapsed;
+    const fade = t < 5 ? 1 : Math.max(0, 1 - (t - 5));
+    if (fade <= 0) return;
+
+    ctx.save();
+    ctx.globalAlpha = fade;
+    ctx.font = "14px var(--font-jp), sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    const lines = [
+      "WASD / 矢印キーで移動",
+      "Shift で静かに歩く  ・  Space でダッシュ（音が大きい）",
+      "家具の影に隠れて、人間の視界を避けろ",
+    ];
+    const yBase = h - 140;
+    lines.forEach((line, i) => {
+      const y = yBase + i * 24;
+      ctx.fillStyle = "rgba(0,0,0,0.7)";
+      ctx.fillText(line, w / 2 + 1, y + 1);
+      ctx.fillStyle = "rgba(232,224,196,0.9)";
+      ctx.fillText(line, w / 2, y);
+    });
+    ctx.restore();
   }
 }

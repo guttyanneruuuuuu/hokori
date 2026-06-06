@@ -46,6 +46,7 @@ export class Player {
 
     this.t = 0;
     this.dashCooldown = 0;
+    this.trail = []; // ダッシュ時の残像
   }
 
   // 半径（描画用）
@@ -102,6 +103,16 @@ export class Player {
     this.noise = noise * (0.4 + (v / 200));
     // サイズに応じて少し増える
     this.noise *= 1 + (this.size - 1) * 0.04;
+
+    // ダッシュ残像
+    if (this.state === "dash" && v > 80) {
+      this.trail.push({ x: this.x, y: this.y, r: this.radius, life: 0.4 });
+    }
+    for (let i = this.trail.length - 1; i >= 0; i--) {
+      this.trail[i].life -= dt;
+      if (this.trail[i].life <= 0) this.trail.splice(i, 1);
+    }
+    if (this.trail.length > 12) this.trail.splice(0, this.trail.length - 12);
   }
 
   // 吸収
@@ -117,6 +128,19 @@ export class Player {
     const r = this.radius;
     const cx = this.x - camX;
     const cy = this.y - camY;
+
+    // 残像（先に描く）
+    if (this.trail.length) {
+      ctx.save();
+      for (const t of this.trail) {
+        const a = Math.max(0, t.life / 0.4) * 0.4;
+        ctx.fillStyle = `rgba(232,224,196,${a})`;
+        ctx.beginPath();
+        ctx.arc(t.x - camX, t.y - camY, t.r * (0.6 + (1 - t.life / 0.4) * 0.3), 0, TAU);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
 
     // 接地影
     ctx.save();

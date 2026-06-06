@@ -27,8 +27,8 @@ export class Human {
     this.patrolIdx = 0;
     this.waitTimer = 0;
 
-    this.viewAngle = Math.PI * 0.45;  // 視界の半角 (=合計90度)
-    this.viewDist  = 240;
+    this.viewAngle = Math.PI * 0.40;  // 視界の半角 (=合計80度)
+    this.viewDist  = 220;
 
     // AI 状態
     this.state = "patrol";   // patrol | look | investigate | alarm
@@ -37,6 +37,8 @@ export class Human {
     this.lastSeenX = 0;
     this.lastSeenY = 0;
     this.lookTimer = 0;
+    this.lookSweepT = 0;
+    this.investigateTimer = 0;
 
     // ビジュアル
     this.bobT = 0;
@@ -123,10 +125,13 @@ export class Human {
       }
     } else if (this.state === "look") {
       this.hasVacuum = false;
-      // 立ち止まって見回す
+      // 立ち止まってきょろきょろ見回す
       moveSpeed = 0;
-      targetX = this.lastSeenX;
-      targetY = this.lastSeenY;
+      this.lookSweepT += dt;
+      const baseAngle = Math.atan2(this.lastSeenY - this.y, this.lastSeenX - this.x);
+      const sweep = Math.sin(this.lookSweepT * 1.3) * 0.55;
+      targetX = this.x + Math.cos(baseAngle + sweep) * 100;
+      targetY = this.y + Math.sin(baseAngle + sweep) * 100;
     } else if (this.state === "investigate") {
       this.hasVacuum = false;
       targetX = this.lastSeenX; targetY = this.lastSeenY;

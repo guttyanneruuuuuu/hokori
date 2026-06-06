@@ -6,6 +6,29 @@
 import { Game } from "./game.js";
 import { UI } from "./ui.js";
 
+// --- Polyfill: CanvasRenderingContext2D.roundRect ---
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+    if (typeof r === "number") r = [r, r, r, r];
+    else if (Array.isArray(r)) {
+      if (r.length === 1) r = [r[0], r[0], r[0], r[0]];
+      else if (r.length === 2) r = [r[0], r[1], r[0], r[1]];
+      else if (r.length === 3) r = [r[0], r[1], r[2], r[1]];
+    } else r = [0, 0, 0, 0];
+    const [tl, tr, br, bl] = r;
+    this.moveTo(x + tl, y);
+    this.lineTo(x + w - tr, y);
+    this.quadraticCurveTo(x + w, y, x + w, y + tr);
+    this.lineTo(x + w, y + h - br);
+    this.quadraticCurveTo(x + w, y + h, x + w - br, y + h);
+    this.lineTo(x + bl, y + h);
+    this.quadraticCurveTo(x, y + h, x, y + h - bl);
+    this.lineTo(x, y + tl);
+    this.quadraticCurveTo(x, y, x + tl, y);
+    return this;
+  };
+}
+
 const canvas = document.getElementById("game-canvas");
 const ui = new UI();
 const game = new Game(canvas);
