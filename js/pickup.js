@@ -81,6 +81,19 @@ export class Pickup {
     const cy = this.y - camY;
     ctx.save();
     ctx.translate(cx, cy);
+
+    // 微かな自己発光（暗闇でも完全には消えないよう）— ライティング前に描画される
+    const pulse = 0.6 + Math.sin(this.t * 2) * 0.2;
+    const glowR = this.size * 2.2;
+    const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+    const glowCol = this.type === "hair" ? "60,60,72" : "232,220,180";
+    glow.addColorStop(0, `rgba(${glowCol},${0.18 * pulse})`);
+    glow.addColorStop(1, `rgba(${glowCol},0)`);
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, glowR, 0, TAU);
+    ctx.fill();
+
     ctx.rotate(this.angle);
 
     if (this.type === "dust") {

@@ -272,17 +272,26 @@ export class Game {
     this.player.drawNoiseRing(ctx, cx, cy);
     this.player.draw(ctx, cx, cy);
 
-    // 人間 (視界コーン → 本体)
-    for (const human of this.humans) human.drawVisionCone(ctx, cx, cy);
+    // 人間と掃除機（本体）
     for (const human of this.humans) human.draw(ctx, cx, cy);
     for (const v of this.vacuums) v.draw(ctx, cx, cy);
 
     // ライティングを乗算
     this.lighting.render(ctx, this.world, cx, cy, w, h, this.player);
 
-    // ライティング後にもう一度プレイヤーのアウトラインを乗せる（暗くて見えない事故防止）
-    // ただし可視性が高いと強調、低いと薄っすら
+    // === ライティングの "上" に描画するもの ===
+    // 視界コーンはゲームメカニクスとして常に見えるべき
+    for (const human of this.humans) human.drawVisionCone(ctx, cx, cy);
+
+    // プレイヤーのアウトライン強調（暗くて見えない事故防止）
     this._drawPlayerOutline(ctx, cx, cy);
+
+    // 疑念アイコンが暗闇で消えないように人間頭上のアイコンも再描画
+    for (const human of this.humans) {
+      if (human.suspicion > 0.1) {
+        human._drawSuspicionIcon(ctx, human.x - cx, human.y - cy - 44);
+      }
+    }
 
     // ポーズ時の灰色オーバーレイ
     if (this.state === "paused") {
@@ -296,14 +305,45 @@ export class Game {
     const py = this.player.y - cy;
     const r = this.player.radius;
     ctx.save();
+    // プレイヤー位置の "存在表示" — 暗闇でも見えるようにスクリーン合成
     ctx.globalCompositeOperation = "screen";
-    // 隠れている時は薄く、明るい時は強調
-    const a = this.lastHidden ? 0.05 : 0.15 + (1 - (this.lastVisibility ?? 1)) * 0.08;
+
+    // 内側の柔らかい光
+    const g = ctx.createRadialGradient(px, py, 0, px, py, r * 1.6);
+    const isHidden = this.lastHidden;
+    // 隠れている時は青っぽい(安全)、明るい場所では暖色(警告)
+    if (isHidden) {
+      g.addColorStop(0, "rgba(138,166,180,0.45)");
+      g.addColorStop(1, "rgba(138,166,180,0)");
+    } else {
+      const danger = this.lastVisibility ?? 0.5;
+      const r1 = Math.floor(217 + danger * 30);
+      const g1 = Math.floor(200 - danger * 50);
+      g.addColorStop(0, `rgba(${r1},${g1},158,0.55)`);
+      g.addColorStop(1, `rgba(${r1},${g1},158,0)`);
+    }
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(px, py, r * 1.6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // アウトライン
+    const a = isHidden ? 0.15 : 0.35;
     ctx.strokeStyle = `rgba(232,224,196,${a})`;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(px, py, r + 2, 0, Math.PI * 2);
+    ctx.arc(px, py, r + 1, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
+
+    // 隠れている時の "SAFE" インジケータ
+    if (isHidden && this.player.absorbed > 0) {
+      ctx.save();
+      ctx.font = "bold 10px var(--font-en), serif";
+      ctx.fillStyle = "rgba(138,166,180,0.7)";
+      ctx.textAlign = "center";
+      ctx.fillText("HIDDEN", px, py - r - 8);
+      ctx.restore();
+    }
   }
 }
