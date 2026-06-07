@@ -69,6 +69,12 @@ export class Input {
       }, 100);
     });
 
+    // ウィンドウリサイズ検出
+    window.addEventListener("resize", () => {
+      this._isLandscape = window.innerHeight < window.innerWidth;
+      this._updateTouchUILayout();
+    });
+
     // --- 仮想ジョイスティック UI (動的生成) ---
     this._buildTouchUI();
     this._bindTouchEvents();
