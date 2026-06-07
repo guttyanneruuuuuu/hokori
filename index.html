@@ -130,6 +130,7 @@
         </div>
       </div>
       <div class="hud-center">
+        <div class="hud-stage" id="hud-stage">STAGE 1 — リビングの片隅</div>
         <div class="hud-time" id="hud-time">3:00</div>
         <div class="hud-goal">GOAL <span id="hud-goal">8.0</span></div>
         <div class="hud-stealth" id="hud-stealth">
@@ -166,6 +167,29 @@
 
     <!-- カウントダウン -->
     <div class="countdown" id="countdown"></div>
+
+    <!-- ステージ開始バナー -->
+    <div class="stage-banner" id="stage-banner">
+      <div class="stage-banner-num" id="stage-banner-num">STAGE 1</div>
+      <div class="stage-banner-name" id="stage-banner-name">リビングの片隅</div>
+      <div class="stage-banner-threats" id="stage-banner-threats"></div>
+    </div>
+
+    <!-- ステージクリア演出 -->
+    <div class="stageclear-overlay" id="stageclear-overlay">
+      <div class="stageclear-content">
+        <div class="sc-badge">★</div>
+        <h2 class="sc-title">STAGE CLEAR!</h2>
+        <div class="sc-stage-name" id="sc-stage-name"></div>
+        <div class="sc-bonuses">
+          <div class="sc-row"><span>残り時間ボーナス</span><strong id="sc-time-bonus">0</strong></div>
+          <div class="sc-row"><span>ステージボーナス</span><strong id="sc-stage-bonus">0</strong></div>
+          <div class="sc-row"><span>コンボボーナス</span><strong id="sc-combo-bonus">0</strong></div>
+          <div class="sc-row total"><span>合計</span><strong id="sc-total">0</strong></div>
+        </div>
+        <div class="sc-next" id="sc-next">次のステージへ…</div>
+      </div>
+    </div>
 
     <!-- フラッシュ (吸収・ダメージ) -->
     <div class="flash-overlay" id="flash-overlay"></div>
@@ -206,6 +230,7 @@
       <h1 id="end-title">GAME OVER</h1>
       <p id="end-desc"></p>
       <div class="end-stats">
+        <div><span>到達ステージ</span><strong id="end-stage">1</strong></div>
         <div><span>到達サイズ</span><strong id="end-size">0.0</strong></div>
         <div><span>吸収数</span><strong id="end-count">0</strong></div>
         <div><span>生存時間</span><strong id="end-time">0:00</strong></div>

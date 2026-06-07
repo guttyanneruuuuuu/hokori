@@ -1383,3 +1383,169 @@ body {
     transform: translateY(0);
   }
 }
+
+/* =========================================================
+   ステージ進行制 UI — バナー / クリア演出 / HUDステージ表示
+   ========================================================= */
+
+/* HUD のステージ名 */
+.hud-stage {
+  font-family: var(--font-en);
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  color: var(--accent-4);
+  text-transform: uppercase;
+  opacity: 0.9;
+  margin-bottom: 2px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+  max-width: 46vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (max-width: 520px) {
+  .hud-stage { font-size: 0.52rem; max-width: 40vw; }
+}
+
+/* ステージ開始バナー */
+.stage-banner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.8);
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 60;
+}
+.stage-banner.active {
+  animation: stageBannerIn 2.6s cubic-bezier(0.2, 0.9, 0.25, 1) forwards;
+}
+@keyframes stageBannerIn {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.7); letter-spacing: 0.5em; }
+  12% { opacity: 1; transform: translate(-50%, -50%) scale(1.05); }
+  20% { transform: translate(-50%, -50%) scale(1); }
+  80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -55%) scale(1); }
+}
+.stage-banner-num {
+  font-family: var(--font-en);
+  font-size: clamp(1.6rem, 7vw, 3rem);
+  font-weight: 900;
+  letter-spacing: 0.15em;
+  color: var(--accent-4);
+  text-shadow: 0 0 24px rgba(255, 212, 80, 0.6), 0 3px 8px rgba(0, 0, 0, 0.9);
+}
+.stage-banner-name {
+  font-family: var(--font-ja);
+  font-size: clamp(1rem, 4.5vw, 1.7rem);
+  font-weight: 900;
+  color: var(--ink);
+  margin-top: 0.2em;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+}
+.stage-banner-threats {
+  margin-top: 0.7em;
+  font-size: clamp(0.85rem, 3.5vw, 1.2rem);
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+}
+
+/* ステージクリア演出 */
+.stageclear-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(20, 18, 8, 0.72), rgba(4, 4, 8, 0.92));
+  opacity: 0;
+  pointer-events: none;
+  z-index: 70;
+  transition: opacity 0.35s ease;
+}
+.stageclear-overlay.active {
+  opacity: 1;
+}
+.stageclear-content {
+  text-align: center;
+  transform: scale(0.9);
+  animation: scPop 0.5s cubic-bezier(0.2, 1.3, 0.4, 1) forwards;
+  padding: 1.5em;
+}
+@keyframes scPop {
+  to { transform: scale(1); }
+}
+.sc-badge {
+  font-size: clamp(2.5rem, 12vw, 4.5rem);
+  color: var(--accent-4);
+  text-shadow: 0 0 30px rgba(255, 212, 80, 0.8);
+  animation: scSpin 3s ease-in-out infinite;
+}
+@keyframes scSpin {
+  0%, 100% { transform: rotate(-12deg) scale(1); }
+  50% { transform: rotate(12deg) scale(1.15); }
+}
+.sc-title {
+  font-family: var(--font-en);
+  font-size: clamp(1.8rem, 8vw, 3.2rem);
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  color: var(--accent-4);
+  text-shadow: 0 0 26px rgba(255, 212, 80, 0.5), 0 3px 8px rgba(0, 0, 0, 0.9);
+  margin-bottom: 0.1em;
+}
+.sc-stage-name {
+  font-family: var(--font-ja);
+  font-size: clamp(0.85rem, 3.5vw, 1.2rem);
+  color: var(--ink-dim);
+  margin-bottom: 1em;
+  letter-spacing: 0.08em;
+}
+.sc-bonuses {
+  display: inline-block;
+  text-align: left;
+  background: rgba(12, 12, 18, 0.7);
+  border: 1px solid rgba(255, 212, 80, 0.25);
+  border-radius: 12px;
+  padding: 0.9em 1.4em;
+  min-width: min(280px, 80vw);
+}
+.sc-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 2em;
+  padding: 0.25em 0;
+  font-family: var(--font-ja);
+  font-size: clamp(0.78rem, 3vw, 0.95rem);
+  color: var(--ink-dim);
+}
+.sc-row strong {
+  font-family: var(--font-en);
+  color: var(--ink);
+  font-size: 1.05em;
+}
+.sc-row.total {
+  border-top: 1px solid rgba(255, 212, 80, 0.3);
+  margin-top: 0.4em;
+  padding-top: 0.5em;
+  color: var(--accent-4);
+}
+.sc-row.total strong {
+  color: var(--accent-4);
+  font-size: 1.3em;
+  text-shadow: 0 0 12px rgba(255, 212, 80, 0.5);
+}
+.sc-next {
+  margin-top: 1.1em;
+  font-family: var(--font-ja);
+  font-size: clamp(0.78rem, 3vw, 0.95rem);
+  color: var(--accent-2);
+  letter-spacing: 0.1em;
+  animation: scBlink 1.2s ease-in-out infinite;
+}
+@keyframes scBlink {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}

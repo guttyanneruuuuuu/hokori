@@ -9,20 +9,31 @@ import { Input } from "./input.js";
 import { World, WORLD_W, WORLD_H } from "./world.js";
 import { Player } from "./player.js";
 import { Pickup } from "./pickup.js";
-import { Human, RobotVacuum } from "./human.js";
+import { Human, RobotVacuum, Cat } from "./human.js";
 import { Lighting } from "./lighting.js";
 import { ParticleSystem } from "./particles.js";
 import { AudioSystem } from "./audio.js";
-import { clamp, dist, lerp, TAU } from "./utils.js";
+import { clamp, dist, lerp, TAU, rand } from "./utils.js";
 
-const COMBO_WINDOW = 1.8;   // 連続吸収許容秒数
+const COMBO_WINDOW = 2.2;   // 連続吸収許容秒数（少し余裕を持たせる）
 
-// 難易度プリセット
+// 難易度プリセット — ステージ進行制のベース値（倍率として作用）
 export const DIFFICULTIES = {
-  easy:   { duration: 220, goal: 7.0,  humans: 1, vacuums: 0, suspicionGain: 0.85, viewDist: 200 },
-  normal: { duration: 180, goal: 8.0,  humans: 2, vacuums: 1, suspicionGain: 1.0,  viewDist: 220 },
-  hard:   { duration: 150, goal: 9.5,  humans: 2, vacuums: 2, suspicionGain: 1.3,  viewDist: 250 },
+  easy:   { label: "かんたん", baseDuration: 150, baseGoal: 6.0, humanScale: 0.8, vacuumScale: 0.6, suspicionGain: 0.78, viewDist: 195, catScale: 0.6 },
+  normal: { label: "ふつう",   baseDuration: 135, baseGoal: 6.5, humanScale: 1.0, vacuumScale: 1.0, suspicionGain: 1.0,  viewDist: 215, catScale: 1.0 },
+  hard:   { label: "むずかしい", baseDuration: 120, baseGoal: 7.5, humanScale: 1.25, vacuumScale: 1.3, suspicionGain: 1.28, viewDist: 245, catScale: 1.3 },
 };
+
+// ステージ進行設定 — ステージごとに難易度が上がっていく
+// 各ステージは「目標サイズ達成でクリア → 次ステージへ」。生存し続けるほどスコアが伸びる
+export const STAGE_PRESETS = [
+  { name: "リビングの片隅", goal: 5.0,  humans: 1, vacuums: 0, cats: 0, duration: 120, tint: "#0a0a14" },
+  { name: "夜のキッチン",   goal: 6.0,  humans: 2, vacuums: 0, cats: 0, duration: 115, tint: "#0c0a12" },
+  { name: "うろつく掃除機", goal: 7.0,  humans: 2, vacuums: 1, cats: 0, duration: 110, tint: "#0a0c14" },
+  { name: "ネコの寝室",     goal: 8.0,  humans: 2, vacuums: 1, cats: 1, duration: 110, tint: "#100a12" },
+  { name: "夜更けの家",     goal: 9.0,  humans: 3, vacuums: 1, cats: 1, duration: 105, tint: "#0a0e16" },
+  { name: "総力の掃除",     goal: 10.0, humans: 3, vacuums: 2, cats: 2, duration: 100, tint: "#120a10" },
+];
 
 export class Game {
   constructor(canvas) {
@@ -38,6 +49,16 @@ export class Game {
     this.pickups = [];
     this.humans = [];
     this.vacuums = [];
+    this.cats = [];
+
+    // ステージ進行
+    this.stageIndex = 0;
+    this.stageConf = null;
+    this.stageGoal = 5.0;
+    this.totalElapsed = 0;       // 全ステージ通算の生存時間
+    this.stageClearScreen = false;
+    this.stageClearTimer = 0;
+    this._pendingNextStage = false;
 
     this.camX = 0;
     this.camY = 0;
@@ -78,6 +99,8 @@ export class Game {
     this.onCountdown = null;    // (n)
     this.onFlash = null;        // (kind)
     this.onPowerups = null;     // (powerups)
+    this.onStageClear = null;   // (data) ステージクリア演出
+    this.onStageStart = null;   // (data) 新ステージ開始バナー
 
     this.alertLevel = 0;
     this.lastVisibility = 0;
@@ -102,57 +125,98 @@ export class Game {
   }
 
   // ---------- ライフサイクル ----------
+  // 新しいゲーム（ステージ1から）
   newGame() {
     this._ended = false;
-    this.world = new World();
+    this.stageIndex = 0;
+    this.totalElapsed = 0;
+    this.score = 0;
+    this.bestCombo = 0;
+
+    // プレイヤー新規（サイズはステージ間で持ち越さずリセット）
     this.player = new Player(160, 540);
-    this.pickups = Pickup.spawnRandom(this.world, 120);
 
+    this._setupStage(this.stageIndex, true);
+    this.engine.start();
+  }
+
+  // ステージごとのセットアップ
+  _setupStage(idx, firstTime = false) {
     const D = this.diffConf;
+    const preset = STAGE_PRESETS[Math.min(idx, STAGE_PRESETS.length - 1)];
+    // 最後のステージ以降は無限増殖（エンドレス）
+    const overshoot = Math.max(0, idx - (STAGE_PRESETS.length - 1));
+    this.stageConf = preset;
 
-    // 巡回経路 — 難易度で人数調整
+    this.world = new World();
+    this._stageTint = preset.tint || "#04040a";
+
+    // プレイヤーをスタート位置に戻す（サイズはリセットして毎ステージ成長を楽しむ）
+    this.player.x = 160; this.player.y = 540;
+    this.player.vx = 0; this.player.vy = 0;
+    this.player.size = 1.0;
+    this.player.absorbed = this.player.absorbed || 0;
+    this.player.stamina = 1.0;
+    this.player.powerups = { speed: 0, invincible: 0, magnet: 0, ghost: 0 };
+    this.player.trail = [];
+
+    this.pickups = Pickup.spawnRandom(this.world, 130);
+
+    // 目標サイズ・制限時間（難易度倍率込み）
+    this.stageGoal = (preset.goal + overshoot * 1.2) * (D.baseGoal / 6.5);
+    this.diffConf.goal = this.stageGoal; // 互換のため
+    const dur = Math.max(70, (preset.duration + (firstTime ? 15 : 0)) * (D.baseDuration / 135) - overshoot * 5);
+    this.timeLeft = dur;
+    this._stageDuration = dur;
+    this.elapsed = 0;
+
+    // 人間・掃除機・猫の数（難易度倍率込み・上限あり）
+    const nHumans  = Math.min(4, Math.max(1, Math.round((preset.humans + overshoot * 0.5) * D.humanScale)));
+    const nVacuums = Math.min(3, Math.round((preset.vacuums + overshoot * 0.5) * D.vacuumScale));
+    const nCats    = Math.min(3, Math.round((preset.cats + overshoot * 0.4) * D.catScale));
+
+    // 巡回経路
     const patrols = [
-      [
-        { x: 1000, y: 400 },
-        { x: 1300, y: 250 },
-        { x: 1100, y: 700 },
-        { x: 600, y: 700 },
-        { x: 300, y: 500 },
-        { x: 500, y: 250 },
-      ],
-      [
-        { x: 1380, y: 700 },
-        { x: 1280, y: 820 },
-        { x: 1100, y: 720 },
-        { x: 1220, y: 600 },
-        { x: 1380, y: 660 },
-      ],
+      [ { x: 1000, y: 400 }, { x: 1300, y: 250 }, { x: 1100, y: 700 }, { x: 600, y: 700 }, { x: 300, y: 500 }, { x: 500, y: 250 } ],
+      [ { x: 1380, y: 700 }, { x: 1280, y: 820 }, { x: 1100, y: 720 }, { x: 1220, y: 600 }, { x: 1380, y: 660 } ],
+      [ { x: 400, y: 200 }, { x: 900, y: 200 }, { x: 1300, y: 400 }, { x: 900, y: 800 }, { x: 300, y: 800 } ],
+      [ { x: 700, y: 900 }, { x: 1100, y: 500 }, { x: 700, y: 300 }, { x: 300, y: 600 } ],
     ];
     this.humans = [];
-    for (let i = 0; i < D.humans; i++) {
-      const startX = i === 0 ? 800 : 1300;
-      const startY = i === 0 ? 400 : 720;
+    for (let i = 0; i < nHumans; i++) {
+      const startX = 700 + i * 200;
+      const startY = i % 2 === 0 ? 400 : 720;
       const h = new Human(startX, startY, patrols[i % patrols.length]);
-      h.viewDist = D.viewDist + (i === 1 ? -20 : 0);
-      h.viewAngle = Math.PI * (i === 1 ? 0.36 : 0.40);
-      h.shirtHue = i === 1 ? 20 : 220;
-      h.suspicionGain = D.suspicionGain;
+      h.viewDist = D.viewDist + rand(-15, 15) + overshoot * 8;
+      h.viewAngle = Math.PI * (0.36 + Math.random() * 0.06);
+      h.shirtHue = [220, 20, 140, 280][i % 4];
+      h.suspicionGain = D.suspicionGain * (1 + overshoot * 0.08);
       this.humans.push(h);
     }
 
     // ロボ掃除機
     this.vacuums = [];
-    for (let i = 0; i < D.vacuums; i++) {
-      const x = i === 0 ? 1200 : 700;
-      const y = i === 0 ? 500 : 280;
-      this.vacuums.push(new RobotVacuum(x, y));
+    const vSpots = [[1200, 500], [700, 280], [400, 750]];
+    for (let i = 0; i < nVacuums; i++) {
+      const [x, y] = vSpots[i % vSpots.length];
+      const v = new RobotVacuum(x, y);
+      v.speed = 70 + overshoot * 6;
+      this.vacuums.push(v);
+    }
+
+    // 猫
+    this.cats = [];
+    const cSpots = [[1230, 700], [520, 450], [1100, 220]];
+    for (let i = 0; i < nCats; i++) {
+      const [x, y] = cSpots[i % cSpots.length];
+      const c = new Cat(x, y);
+      c.speed += overshoot * 10;
+      this.cats.push(c);
     }
 
     this.particles = new ParticleSystem();
     this.particles.initAmbient(this.world, 100);
 
-    this.timeLeft = D.duration;
-    this.elapsed = 0;
     this.shake = 0;
     this.floatPopups = [];
 
@@ -167,10 +231,9 @@ export class Game {
     this.combo = 0;
     this.comboTimer = 0;
     this.comboMult = 1;
-    this.bestCombo = 0;
-    this.score = 0;
     this.alertLevel = 0;
-    this._powerupSpawnTimer = 18;
+    this._powerupSpawnTimer = 16;
+    this._stageClearTriggered = false;
 
     // Touch UI 表示
     if (this._isTouchDevice) this.input.showTouchControls(true);
@@ -179,12 +242,21 @@ export class Game {
     this.audio.resumeIfNeeded();
     this.audio.stopBGM();
 
+    // 新ステージバナー
+    if (this.onStageStart) {
+      this.onStageStart({
+        stage: idx + 1,
+        name: overshoot > 0 ? `${preset.name} +${overshoot}` : preset.name,
+        goal: this.stageGoal,
+        humans: nHumans, vacuums: nVacuums, cats: nCats,
+      });
+    }
+
     // カウントダウン開始
     this.state = "countdown";
-    this.countdown = 3.0;
-    if (this.onCountdown) this.onCountdown(3);
-
-    this.engine.start();
+    this.countdown = firstTime ? 3.0 : 2.0;
+    this._lastCountdownShown = null;
+    if (this.onCountdown) this.onCountdown(Math.ceil(this.countdown));
   }
 
   pause() {
@@ -208,6 +280,8 @@ export class Game {
     this.audio.setMasterMute(false);
     this.input.showTouchControls(false);
     this.state = "idle";
+    this._pendingNextStage = false;
+    this._stageClearTriggered = false;
   }
 
   _updateTargetZoom(immediate = false) {
@@ -255,6 +329,20 @@ export class Game {
       return;
     }
 
+    // ステージクリア演出中：環境とパーティクルだけ動かす
+    if (this.state === "stageclear") {
+      this.world.update(dt);
+      this.particles.update(dt, this.world);
+      // 祝祭パーティクル
+      if (Math.random() < dt * 8) {
+        this.particles.burst(this.player.x, this.player.y, 6, { color: "rgba(255,220,140,1)" });
+      }
+      if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 8);
+      this._shakeSeed += dt;
+      this.input.flush();
+      return;
+    }
+
     if (this.state !== "playing") {
       this.input.flush();
       return;
@@ -269,7 +357,8 @@ export class Game {
 
     // タイマー
     this.elapsed += dt;
-    this.timeLeft = Math.max(0, this.diffConf.duration - this.elapsed);
+    this.totalElapsed += dt;
+    this.timeLeft = Math.max(0, this._stageDuration - this.elapsed);
 
     // コンボタイマー減衰
     if (this.combo > 0) {
@@ -407,6 +496,36 @@ export class Game {
       }
     }
 
+    // ネコ
+    for (const c of this.cats) {
+      c.update(dt, this.player, this.world, this.lastVisibility);
+      if (c.state === "chase") {
+        this.shake = Math.max(this.shake, 3);
+        if (Math.random() < dt * 1.5) this.input.vibrate(15);
+      }
+      if (c.isDangerous && dist(c.x, c.y, this.player.x, this.player.y) < pr + c.r * 0.65) {
+        if (this.player.isInvincible) {
+          const dx = c.x - this.player.x, dy = c.y - this.player.y;
+          const dd = Math.hypot(dx, dy) || 1;
+          c.x += (dx / dd) * 120; c.y += (dy / dd) * 120;
+          c.state = "return"; c.alertness = 0;
+          this._addPopup(c.x, c.y - 28, "SCARED!", "bonus");
+          this.score += 250;
+          this.audio.pop(700, 0.2, "sawtooth", 0.3);
+          if (this.onFlash) this.onFlash("power");
+          this.input.vibrate([40, 20, 40]);
+        } else {
+          return this._end("lose", "ネコに飛びかかられてしまった…");
+        }
+      }
+    }
+
+    // ステージクリア判定（目標サイズ到達）
+    if (!this._stageClearTriggered && this.player.size >= this.stageGoal) {
+      this._stageClearTriggered = true;
+      return this._clearStage();
+    }
+
     // 残りピックアップが少なくなったら追加生成
     if (this.pickups.length < 35) {
       const more = Pickup.spawnRandom(this.world, 40, false); // 通常のみ補充
@@ -465,10 +584,7 @@ export class Game {
     // 危険時の振動
     if (anyAlarm && Math.random() < dt * 2) this.input.vibrate(20);
 
-    // 勝利・敗北判定
-    if (this.player.size >= this.diffConf.goal) {
-      return this._end("win", `あなたは塵の王になった！ サイズ ${this.player.size.toFixed(1)}`);
-    }
+    // 敗北判定（時間切れ）
     if (this.timeLeft <= 0) {
       return this._end("lose", "夜明けが来てしまった… 朝には掃除されてしまう。");
     }
@@ -476,10 +592,10 @@ export class Game {
     // HUD 更新
     if (this.onHud) this.onHud({
       size: this.player.size,
-      sizeMax: this.diffConf.goal,
+      sizeMax: this.stageGoal,
       alert: this.alertLevel,
       timeLeft: this.timeLeft,
-      goal: this.diffConf.goal,
+      goal: this.stageGoal,
       absorbed: this.player.absorbed,
       hidden: this.lastHidden,
       visibility: this.lastVisibility,
@@ -487,6 +603,8 @@ export class Game {
       score: this.score,
       stamina: this.player.stamina,
       powerups: this.player.powerups,
+      stage: this.stageIndex + 1,
+      stageName: this.stageConf ? this.stageConf.name : "",
     });
     if (this.onPowerups) this.onPowerups(this.player.powerups);
 
@@ -567,6 +685,46 @@ export class Game {
     if (this.onFloatPop) this.onFloatPop({ x, y, text, kind });
   }
 
+  // ステージクリア処理 → ボーナス計算 → 次ステージへ
+  _clearStage() {
+    this.state = "stageclear";
+    this.audio.stopBGM();
+    this.audio.victory();
+    this.input.vibrate([60, 30, 60]);
+
+    // クリアボーナス: 残り時間 + ステージ + コンボ
+    const timeBonus = Math.floor(this.timeLeft) * 25;
+    const stageBonus = (this.stageIndex + 1) * 500;
+    const comboBonus = this.bestCombo * 30;
+    const total = timeBonus + stageBonus + comboBonus;
+    this.score += total;
+
+    if (this.score > this.hiScore) {
+      this.hiScore = this.score;
+      try { localStorage.setItem("dust-hiscore", String(this.hiScore)); } catch {}
+    }
+
+    // クリア演出データ
+    if (this.onStageClear) {
+      this.onStageClear({
+        stage: this.stageIndex + 1,
+        name: this.stageConf ? this.stageConf.name : "",
+        timeBonus, stageBonus, comboBonus, total,
+        score: this.score,
+        size: this.player.size,
+        isLast: false,
+      });
+    }
+
+    // 約3秒後に次のステージへ
+    this._pendingNextStage = true;
+    setTimeout(() => {
+      if (this.state !== "stageclear") return;
+      this.stageIndex++;
+      this._setupStage(this.stageIndex, false);
+    }, 3200);
+  }
+
   _end(result, desc) {
     if (this._ended) return;
     this._ended = true;
@@ -596,12 +754,14 @@ export class Game {
       desc,
       size: this.player.size,
       absorbed: this.player.absorbed,
-      elapsed: this.elapsed,
+      elapsed: this.totalElapsed,
       score: this.score,
       hiScore: this.hiScore,
       newBest,
       bestCombo: this.bestCombo,
       difficulty: this.difficulty,
+      stage: this.stageIndex + 1,
+      stageName: this.stageConf ? this.stageConf.name : "",
     });
     this.input.showTouchControls(false);
     setTimeout(() => this.engine.stop(), 1500);
@@ -617,8 +777,8 @@ export class Game {
     const vw = w / z;
     const vh = h / z;
 
-    // 背景クリア (黒)
-    ctx.fillStyle = "#04040a";
+    // 背景クリア (ステージごとの色味)
+    ctx.fillStyle = this._stageTint || "#04040a";
     ctx.fillRect(0, 0, w, h);
 
     // カメラ揺れ
@@ -644,6 +804,7 @@ export class Game {
 
     for (const human of this.humans) human.draw(ctx, cx, cy);
     for (const v of this.vacuums) v.draw(ctx, cx, cy);
+    for (const c of this.cats) c.draw(ctx, cx, cy);
 
     ctx.restore();
 
@@ -860,6 +1021,14 @@ export class Game {
         drawArrow(sx, sy, "rgba(217,74,74,1)");
       }
     }
+    for (const c of this.cats) {
+      if (c.state !== "chase") continue;
+      const sx = (c.x - cx) * z;
+      const sy = (c.y - cy) * z;
+      if (sx < -margin || sx > w + margin || sy < -margin || sy > h + margin) {
+        drawArrow(sx, sy, "rgba(255,90,90,1)");
+      }
+    }
   }
 
   // ----- ミニマップ -----
@@ -934,6 +1103,15 @@ export class Game {
       ctx.fillStyle = "rgba(220,80,80,0.95)";
       ctx.beginPath();
       ctx.arc(x0 + v.x * sx, y0 + v.y * sy, 3, 0, TAU);
+      ctx.fill();
+    }
+
+    // ネコ
+    for (const c of this.cats) {
+      ctx.fillStyle = c.state === "chase" ? "rgba(255,90,90,1)" :
+                      c.state === "alert" ? "rgba(240,200,120,0.9)" : "rgba(160,140,200,0.7)";
+      ctx.beginPath();
+      ctx.arc(x0 + c.x * sx, y0 + c.y * sy, 3.2, 0, TAU);
       ctx.fill();
     }
 

@@ -81,6 +81,8 @@ game.onFlash = (kind) => ui.flash(kind);
 game.onEnd = (d) => {
   setTimeout(() => ui.showEnd(d), 700);
 };
+game.onStageStart = (d) => ui.showStageBanner(d);
+game.onStageClear = (d) => ui.showStageClear(d);
 
 // ---- タイトル ----
 document.getElementById("btn-start").addEventListener("click", () => {

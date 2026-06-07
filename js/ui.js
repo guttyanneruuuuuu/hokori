@@ -29,6 +29,20 @@ export class UI {
     this.countdownEl = document.getElementById("countdown");
     this.flashOverlay = document.getElementById("flash-overlay");
 
+    // ステージ系
+    this.stageHud = document.getElementById("hud-stage");
+    this.stageBanner = document.getElementById("stage-banner");
+    this.stageBannerNum = document.getElementById("stage-banner-num");
+    this.stageBannerName = document.getElementById("stage-banner-name");
+    this.stageBannerThreats = document.getElementById("stage-banner-threats");
+    this.stageClearOverlay = document.getElementById("stageclear-overlay");
+    this.scStageName = document.getElementById("sc-stage-name");
+    this.scTimeBonus = document.getElementById("sc-time-bonus");
+    this.scStageBonus = document.getElementById("sc-stage-bonus");
+    this.scComboBonus = document.getElementById("sc-combo-bonus");
+    this.scTotal = document.getElementById("sc-total");
+    this.endStage = document.getElementById("end-stage");
+
     // Pause stats
     this.pauseSize = document.getElementById("pause-size");
     this.pauseScore = document.getElementById("pause-score");
@@ -135,6 +149,7 @@ export class UI {
       if (this.endEmoji) this.endEmoji.textContent = "💀";
     }
     this.endDesc.textContent = data.desc || "";
+    if (this.endStage) this.endStage.textContent = data.stage || 1;
     this.endSize.textContent = data.size.toFixed(1);
     this.endCount.textContent = data.absorbed;
     const m = Math.floor(data.elapsed / 60);
@@ -206,6 +221,10 @@ export class UI {
     this.timeText.classList.toggle("danger", d.timeLeft < 30);
 
     this.goalText.textContent = d.goal.toFixed(1);
+
+    if (this.stageHud && d.stage) {
+      this.stageHud.textContent = `STAGE ${d.stage}${d.stageName ? " — " + d.stageName : ""}`;
+    }
 
     if (this.scoreText) this.scoreText.textContent = (d.score ?? 0).toLocaleString();
 
@@ -292,6 +311,53 @@ export class UI {
     this._flashHide = setTimeout(() => {
       this.flashOverlay.className = "flash-overlay";
     }, 140);
+  }
+
+  // ステージ開始バナー
+  showStageBanner(d) {
+    if (!this.stageBanner) return;
+    if (this.stageBannerNum) this.stageBannerNum.textContent = `STAGE ${d.stage}`;
+    if (this.stageBannerName) this.stageBannerName.textContent = d.name || "";
+    if (this.stageBannerThreats) {
+      const parts = [];
+      if (d.humans) parts.push(`🧍×${d.humans}`);
+      if (d.vacuums) parts.push(`🤖×${d.vacuums}`);
+      if (d.cats) parts.push(`🐱×${d.cats}`);
+      parts.push(`🎯 ${d.goal.toFixed(1)}`);
+      this.stageBannerThreats.textContent = parts.join("   ");
+    }
+    this.stageBanner.classList.remove("active");
+    void this.stageBanner.offsetWidth;
+    this.stageBanner.classList.add("active");
+    clearTimeout(this._bannerHide);
+    this._bannerHide = setTimeout(() => this.stageBanner.classList.remove("active"), 2600);
+  }
+
+  // ステージクリア演出（数字カウントアップ）
+  showStageClear(d) {
+    if (!this.stageClearOverlay) return;
+    if (this.scStageName) this.scStageName.textContent = `STAGE ${d.stage} — ${d.name || ""}`;
+    this.stageClearOverlay.classList.add("active");
+
+    // 数値をアニメーションで加算
+    const animate = (el, target) => {
+      if (!el) return;
+      let cur = 0;
+      const step = Math.max(1, Math.ceil(target / 24));
+      clearInterval(el._anim);
+      el._anim = setInterval(() => {
+        cur = Math.min(target, cur + step);
+        el.textContent = cur.toLocaleString();
+        if (cur >= target) clearInterval(el._anim);
+      }, 30);
+    };
+    setTimeout(() => animate(this.scTimeBonus, d.timeBonus), 300);
+    setTimeout(() => animate(this.scStageBonus, d.stageBonus), 700);
+    setTimeout(() => animate(this.scComboBonus, d.comboBonus), 1100);
+    setTimeout(() => animate(this.scTotal, d.total), 1600);
+
+    clearTimeout(this._scHide);
+    this._scHide = setTimeout(() => this.stageClearOverlay.classList.remove("active"), 3100);
   }
 
   showModal(id) {

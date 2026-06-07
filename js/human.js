@@ -404,3 +404,190 @@ export class RobotVacuum {
     ctx.restore();
   }
 }
+
+
+// ============================================================
+// Cat — ネコ。普段は寝ているが、近づくと起きて素早く追跡する。
+//   - sleep: その場で丸くなって寝ている（接触してもセーフ）
+//   - alert: プレイヤーの動きに気づいて頭をもたげる
+//   - chase: 猛スピードで追いかける（接触で即アウト）
+//   - 一定時間見失うと興味を失い、再び寝る
+// ============================================================
+export class Cat {
+  constructor(x, y) {
+    this.x = x; this.y = y;
+    this.homeX = x; this.homeY = y;
+    this.vx = 0; this.vy = 0;
+    this.r = 20;
+    this.angle = rand(0, TAU);
+    this.speed = 230;        // 追跡は非常に速い
+    this.senseRange = 230;   // この距離内のプレイヤーの動きを察知
+    this.pounceRange = 60;   // この距離で飛びかかる
+    this.state = "sleep";    // sleep | alert | chase | return
+    this.alertness = 0;      // 0..1
+    this.chaseTimer = 0;
+    this.lostTimer = 0;
+    this.t = rand(0, 100);
+    this.furHue = choose([28, 32, 0, 210]); // 茶トラ / グレー / 黒 / 三毛
+    this.dark = Math.random() < 0.35;
+    this.pounceVel = 0;
+  }
+
+  update(dt, player, world, visibility) {
+    this.t += dt;
+    const d = dist(this.x, this.y, player.x, player.y);
+
+    // プレイヤーの動き・ノイズ・距離から「気づき度」を計算
+    const playerSpeed = Math.hypot(player.vx, player.vy);
+    const motionFactor = clamp(playerSpeed / 160, 0, 1);
+    const noiseFactor = clamp(player.noise, 0, 1.5);
+    const proximity = clamp(1 - d / this.senseRange, 0, 1);
+
+    if (this.state === "sleep" || this.state === "alert") {
+      // 近くで動く・音を立てると徐々に起きる。じっとしていると見逃す
+      const wake = proximity * (motionFactor * 0.8 + noiseFactor * 0.7 + 0.08);
+      this.alertness = clamp(this.alertness + (d < this.senseRange ? wake * dt * 1.6 : -dt * 0.8), 0, 1);
+      if (this.alertness > 0.05 && this.alertness < 0.85) this.state = "alert";
+      else if (this.alertness <= 0.05) this.state = "sleep";
+      if (this.alertness >= 0.85) {
+        this.state = "chase";
+        this.chaseTimer = 0;
+        this.lostTimer = 0;
+      }
+      // 寝ている時は微動
+      this.vx *= 0.85; this.vy *= 0.85;
+    } else if (this.state === "chase") {
+      this.chaseTimer += dt;
+      // 見失い判定：遠ざかる＆隠れていると興味を失う
+      const hidden = world.pointInFurniture(player.x, player.y, true);
+      if (d > this.senseRange * 1.4 || (hidden && d > 120)) {
+        this.lostTimer += dt;
+      } else {
+        this.lostTimer = Math.max(0, this.lostTimer - dt * 2);
+      }
+      if (this.lostTimer > 2.2) {
+        this.state = "return";
+        this.alertness = 0.3;
+      }
+      // 追跡（プレイヤーへ突進）
+      const dx = player.x - this.x, dy = player.y - this.y;
+      const dd = Math.hypot(dx, dy) || 1;
+      const sp = this.speed * (d < 160 ? 1.15 : 1.0);
+      this.vx = (dx / dd) * sp;
+      this.vy = (dy / dd) * sp;
+      this.angle = Math.atan2(dy, dx);
+    } else if (this.state === "return") {
+      // 元の寝床に戻る
+      const dx = this.homeX - this.x, dy = this.homeY - this.y;
+      const dd = Math.hypot(dx, dy) || 1;
+      if (dd < 20) { this.state = "sleep"; this.alertness = 0; this.vx = 0; this.vy = 0; }
+      else { this.vx = (dx / dd) * 90; this.vy = (dy / dd) * 90; this.angle = Math.atan2(dy, dx); }
+    }
+
+    // 移動 & 衝突
+    const nx = this.x + this.vx * dt;
+    const ny = this.y + this.vy * dt;
+    const res = world.resolveCircle(nx, ny, this.r * 0.7);
+    this.x = res.x; this.y = res.y;
+  }
+
+  // chase中のみ接触で致命的
+  get isDangerous() { return this.state === "chase"; }
+
+  draw(ctx, camX, camY) {
+    const cx = this.x - camX;
+    const cy = this.y - camY;
+    const awake = this.state === "chase" || this.state === "return";
+    const bob = awake ? 0 : Math.sin(this.t * 1.6) * 1.2;
+
+    // 影
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.filter = "blur(3px)";
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + this.r * 0.5, this.r * 1.1, this.r * 0.38, 0, 0, TAU);
+    ctx.fill();
+    ctx.filter = "none";
+    ctx.restore();
+
+    const fur = this.dark ? `hsl(${this.furHue}, 12%, 18%)` : `hsl(${this.furHue}, 40%, 48%)`;
+    const furLight = this.dark ? `hsl(${this.furHue}, 12%, 28%)` : `hsl(${this.furHue}, 45%, 62%)`;
+
+    ctx.save();
+    ctx.translate(cx, cy - bob);
+
+    if (!awake) {
+      // 丸まって寝ている
+      ctx.rotate(Math.sin(this.t * 0.5) * 0.05);
+      const g = ctx.createRadialGradient(-4, -4, 2, 0, 0, this.r);
+      g.addColorStop(0, furLight);
+      g.addColorStop(1, fur);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, this.r * 1.1, this.r * 0.85, 0, 0, TAU);
+      ctx.fill();
+      // 耳
+      ctx.fillStyle = fur;
+      ctx.beginPath(); ctx.moveTo(-this.r * 0.6, -this.r * 0.5); ctx.lineTo(-this.r * 0.85, -this.r * 0.95); ctx.lineTo(-this.r * 0.3, -this.r * 0.7); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(this.r * 0.6, -this.r * 0.5); ctx.lineTo(this.r * 0.85, -this.r * 0.95); ctx.lineTo(this.r * 0.3, -this.r * 0.7); ctx.closePath(); ctx.fill();
+      // しっぽ
+      ctx.strokeStyle = fur; ctx.lineWidth = 5; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(this.r * 0.8, this.r * 0.3);
+      ctx.quadraticCurveTo(this.r * 1.5, this.r * 0.2, this.r * 1.3, -this.r * 0.5); ctx.stroke();
+      // 寝息 Zzz
+      if (this.state === "sleep") {
+        const zp = (this.t % 3) / 3;
+        ctx.globalAlpha = Math.max(0, 0.8 - zp);
+        ctx.fillStyle = "rgba(200,210,255,0.9)";
+        ctx.font = "bold 11px serif";
+        ctx.fillText("z", this.r * 0.9 + zp * 8, -this.r - zp * 12);
+        ctx.globalAlpha = 1;
+      }
+      // alert: 「！」マーク
+      if (this.state === "alert") {
+        ctx.fillStyle = `rgba(240,210,140,${0.5 + this.alertness * 0.5})`;
+        ctx.font = "bold 16px serif";
+        ctx.textAlign = "center";
+        ctx.fillText("?", 0, -this.r - 8);
+      }
+    } else {
+      // 起きて追跡 — 体を伸ばして突進
+      ctx.rotate(this.angle);
+      const g = ctx.createLinearGradient(-this.r, 0, this.r, 0);
+      g.addColorStop(0, fur);
+      g.addColorStop(1, furLight);
+      ctx.fillStyle = g;
+      // 胴体（伸びた楕円）
+      ctx.beginPath();
+      ctx.ellipse(0, 0, this.r * 1.4, this.r * 0.7, 0, 0, TAU);
+      ctx.fill();
+      // 頭
+      ctx.fillStyle = furLight;
+      ctx.beginPath(); ctx.arc(this.r * 1.1, 0, this.r * 0.6, 0, TAU); ctx.fill();
+      // 耳
+      ctx.fillStyle = fur;
+      ctx.beginPath(); ctx.moveTo(this.r * 1.0, -this.r * 0.45); ctx.lineTo(this.r * 1.1, -this.r * 0.95); ctx.lineTo(this.r * 1.35, -this.r * 0.4); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(this.r * 1.0, this.r * 0.45); ctx.lineTo(this.r * 1.1, this.r * 0.95); ctx.lineTo(this.r * 1.35, this.r * 0.4); ctx.closePath(); ctx.fill();
+      // 目（光る）
+      ctx.fillStyle = this.state === "chase" ? "rgba(255,230,80,0.95)" : "rgba(180,220,255,0.9)";
+      ctx.beginPath(); ctx.arc(this.r * 1.3, -this.r * 0.2, 2.6, 0, TAU); ctx.arc(this.r * 1.3, this.r * 0.2, 2.6, 0, TAU); ctx.fill();
+      // しっぽ（後ろになびく）
+      ctx.strokeStyle = fur; ctx.lineWidth = 5; ctx.lineCap = "round";
+      const tw = Math.sin(this.t * 12) * this.r * 0.3;
+      ctx.beginPath(); ctx.moveTo(-this.r * 1.2, 0);
+      ctx.quadraticCurveTo(-this.r * 2.0, tw, -this.r * 2.3, tw * 1.5); ctx.stroke();
+    }
+    ctx.restore();
+
+    // chase時の赤い警告リング
+    if (this.state === "chase") {
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+      const pulse = 0.4 + Math.sin(this.t * 10) * 0.3;
+      ctx.strokeStyle = `rgba(217,74,74,${pulse})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, this.r + 10, 0, TAU); ctx.stroke();
+      ctx.restore();
+    }
+  }
+}
