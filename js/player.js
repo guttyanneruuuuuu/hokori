@@ -61,6 +61,10 @@ export class Player {
     this.t = 0;
     this.dashCooldown = 0;
     this.trail = []; // ダッシュ時の残像
+    
+    // 操作性向上用
+    this.lastInputTime = 0;
+    this.inputBuffer = [];
   }
 
   // 半径（描画用）
@@ -68,7 +72,7 @@ export class Player {
     return 8 + Math.sqrt(this.size) * 6.5;
   }
 
-  // 速度倍率
+  // 速度倍率（サイズに応じた重さ）
   get speedBase() {
     // 大きくなると重い（少し緩和して快適に）
     return 180 - clamp(this.size, 1, 14) * 6;
@@ -248,135 +252,121 @@ export class Player {
         const rr = r + 14;
         ctx.fillStyle = "rgba(255,250,200,0.9)";
         ctx.beginPath();
-        ctx.arc(Math.cos(a) * rr, Math.sin(a) * rr, 2, 0, TAU);
+        ctx.arc(Math.cos(a) * rr, Math.sin(a) * rr, 3, 0, TAU);
         ctx.fill();
       }
       ctx.restore();
     }
-    // ===== マグネット (スター) のオーラ =====
+
+    // ===== マグネット状態の吸引エフェクト =====
     if (this.isMagnet) {
+      const phase = this.t * 4;
       ctx.save();
       ctx.translate(cx, cy);
-      const ringR = this.pullRange;
-      ctx.strokeStyle = "rgba(255,220,120,0.35)";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([8, 6]);
+      ctx.strokeStyle = `rgba(255,220,120,${0.3 + Math.sin(phase) * 0.2})`;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
       ctx.beginPath();
-      ctx.arc(0, 0, ringR, 0, TAU);
+      ctx.arc(0, 0, r + 12, 0, TAU);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.restore();
     }
 
-    // 毛 (背面)
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.strokeStyle = "rgba(220,210,180,0.7)";
-    ctx.lineCap = "round";
-    for (const h of this.hairs) {
-      const wob = Math.sin(this.t * 4 + h.wobble) * 0.15;
-      const a = h.a + wob;
-      const l = r * (1.1 + h.len); // 少し長く
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * r * 0.5, Math.sin(a) * r * 0.5);
-      // 曲線にする
-      ctx.quadraticCurveTo(
-        Math.cos(a + 0.2) * l * 0.6, Math.sin(a + 0.2) * l * 0.6,
-        Math.cos(a) * l, Math.sin(a) * l
-      );
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    // 本体: 複数の柔らかい円
+    // ===== メインボディ =====
     ctx.save();
     ctx.translate(cx, cy);
 
-    // ぼんやりオーラ
-    const aura = ctx.createRadialGradient(0, 0, r * 0.3, 0, 0, r * 1.8);
-    aura.addColorStop(0, "rgba(232,224,196,0.30)");
-    aura.addColorStop(1, "rgba(232,224,196,0)");
-    ctx.fillStyle = aura;
-    ctx.beginPath();
-    ctx.arc(0, 0, r * 1.8, 0, TAU);
-    ctx.fill();
+    // 毛玉群
+    for (const tuft of this.tufts) {
+      const phase = this.t * tuft.speed + tuft.phase;
+      const ox = tuft.ox + Math.sin(phase) * tuft.r * 0.5;
+      const oy = tuft.oy + Math.cos(phase) * tuft.r * 0.5;
+      const tr = r * tuft.r * 0.35;
 
-    // 進化色 (大きくなるとうっすら色が変わる)
-    const evolution = clamp((this.size - 3) / 7, 0, 1); // 3 以上で徐々に色変化
-    for (const tu of this.tufts) {
-      const wob = Math.sin(this.t * tu.speed + tu.phase) * 0.15;
-      const tx = tu.ox * r * (0.9 + wob);
-      const ty = tu.oy * r * (0.9 + wob);
-      const tr = tu.r * r * 0.5;
-      // パワーアップ色被せ
-      let hue = tu.hue + evolution * 6;
-      let sat = tu.sat + evolution * 18;
-      let light = tu.light - evolution * 4;
-      if (this.isSpeedBoost) { hue = 200; sat = 30; light = 70; }
-      else if (this.isInvincible) { hue = 45; sat = 60; light = 75; }
-      const g = ctx.createRadialGradient(tx, ty, 0, tx, ty, tr);
-      g.addColorStop(0, `hsla(${hue},${sat}%,${light}%,0.95)`);
-      g.addColorStop(0.7, `hsla(${hue},${sat}%,${light - 20}%,0.55)`);
-      g.addColorStop(1, `hsla(${hue},${sat}%,${light - 30}%,0)`);
+      const g = ctx.createRadialGradient(ox, oy, 0, ox, oy, tr);
+      g.addColorStop(0, `hsl(${tuft.hue}, ${tuft.sat}%, ${tuft.light}%)`);
+      g.addColorStop(1, `hsl(${tuft.hue}, ${tuft.sat - 5}%, ${tuft.light - 15}%)`);
       ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.arc(tx, ty, tr, 0, TAU);
+      ctx.arc(ox, oy, tr, 0, TAU);
       ctx.fill();
     }
 
-    // 中央のハイライト + 目（かわいさ）
-    const eyeR = Math.max(1.2, r * 0.11);
-    const eyeOffset = r * 0.2;
-
-    // 進化が進むと目が3つになる、みたいな小ネタは控えめに「2つ」維持
-    ctx.fillStyle = "rgba(20,18,14,0.95)";
+    // メイン球体
+    const mainGrad = ctx.createRadialGradient(-r * 0.3, -r * 0.3, 0, 0, 0, r);
+    mainGrad.addColorStop(0, "rgba(248,240,220,0.9)");
+    mainGrad.addColorStop(0.5, "rgba(232,224,196,0.8)");
+    mainGrad.addColorStop(1, "rgba(180,165,140,0.7)");
+    ctx.fillStyle = mainGrad;
     ctx.beginPath();
-    ctx.arc(-eyeOffset, -eyeOffset * 0.4, eyeR, 0, TAU);
-    ctx.arc(eyeOffset, -eyeOffset * 0.4, eyeR, 0, TAU);
+    ctx.arc(0, 0, r, 0, TAU);
     ctx.fill();
 
-    // 目のハイライト
-    ctx.fillStyle = "rgba(255,250,230,0.9)";
-    ctx.beginPath();
-    ctx.arc(-eyeOffset + eyeR * 0.3, -eyeOffset * 0.4 - eyeR * 0.3, eyeR * 0.35, 0, TAU);
-    ctx.arc(eyeOffset + eyeR * 0.3, -eyeOffset * 0.4 - eyeR * 0.3, eyeR * 0.35, 0, TAU);
-    ctx.fill();
-
-    // 口（サイズが大きくなったらニカッ）
-    if (this.size > 4) {
-      ctx.strokeStyle = "rgba(20,18,14,0.85)";
-      ctx.lineWidth = Math.max(1, r * 0.05);
-      ctx.lineCap = "round";
+    // 毛（hair）
+    ctx.strokeStyle = "rgba(160,140,100,0.7)";
+    ctx.lineWidth = 1.5;
+    for (const hair of this.hairs) {
+      const wobble = Math.sin(this.t * 3 + hair.wobble) * 0.15;
+      const endX = Math.cos(hair.a + wobble) * (r + hair.len * 8);
+      const endY = Math.sin(hair.a + wobble) * (r + hair.len * 8);
       ctx.beginPath();
-      const mx = 0, my = eyeOffset * 0.4;
-      const mw = r * 0.22;
-      ctx.arc(mx, my - mw * 0.3, mw, Math.PI * 0.18, Math.PI * 0.82);
+      ctx.moveTo(0, 0);
+      ctx.lineTo(endX, endY);
       ctx.stroke();
     }
+
+    // 目
+    ctx.fillStyle = "#1a1a1a";
+    ctx.beginPath();
+    ctx.arc(-r * 0.25, -r * 0.25, r * 0.15, 0, TAU);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(r * 0.25, -r * 0.25, r * 0.15, 0, TAU);
+    ctx.fill();
+
+    // 瞳孔（移動方向に向く）
+    const pupilSize = r * 0.08;
+    const pupilDist = r * 0.08;
+    ctx.fillStyle = "#ffffff";
+    const pupilAngle = this.angle;
+    ctx.beginPath();
+    ctx.arc(
+      -r * 0.25 + Math.cos(pupilAngle) * pupilDist,
+      -r * 0.25 + Math.sin(pupilAngle) * pupilDist,
+      pupilSize,
+      0,
+      TAU
+    );
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(
+      r * 0.25 + Math.cos(pupilAngle) * pupilDist,
+      -r * 0.25 + Math.sin(pupilAngle) * pupilDist,
+      pupilSize,
+      0,
+      TAU
+    );
+    ctx.fill();
 
     ctx.restore();
   }
 
-  // 視覚的なノイズリング（プレイヤーの周りに表示してフィードバック）
+  // ノイズリングの描画（人間に見える範囲）
   drawNoiseRing(ctx, camX, camY) {
-    if (this.noise < 0.05) return;
     const cx = this.x - camX;
     const cy = this.y - camY;
-    const baseR = this.radius;
-    const maxR = baseR + 20 + this.noise * 30;
+    const noiseRadius = Math.max(10, this.noise * 120);
 
     ctx.save();
-    ctx.lineWidth = 1.2;
-    for (let i = 0; i < 3; i++) {
-      const t = (this.t * (0.6 + this.noise * 0.5) + i * 0.33) % 1;
-      const rr = baseR + t * (maxR - baseR);
-      const alpha = (1 - t) * 0.25 * Math.min(1, this.noise);
-      ctx.strokeStyle = `rgba(217,200,158,${alpha})`;
-      ctx.beginPath();
-      ctx.arc(cx, cy, rr, 0, TAU);
-      ctx.stroke();
-    }
+    ctx.globalCompositeOperation = "screen";
+    ctx.strokeStyle = `rgba(217,200,158,${Math.min(0.35, this.noise * 0.5)})`;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 5]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, noiseRadius, 0, TAU);
+    ctx.stroke();
+    ctx.setLineDash([]);
     ctx.restore();
   }
 }
